@@ -4,10 +4,54 @@
 #include <string.h>
 #include <inttypes.h>
 
-#include "tables.h"
-
 #define TIMEOUT_USEC 2000000
-#define MEMORY_GB    12ULL
+
+#ifdef __unix__
+#include <sys/time.h>
+#include <unistd.h>
+
+static uint64_t
+os_uepoch(void)
+{
+    struct timeval tv;
+    gettimeofday(&tv, 0);
+    return UINT64_C(1000000) * tv.tv_sec + tv.tv_usec;
+}
+
+static size_t
+os_physical_memory(void)
+{
+    size_t pages = sysconf(_SC_PHYS_PAGES);
+    size_t page_size = sysconf(_SC_PAGE_SIZE);
+    return pages * page_size;
+}
+
+#elif _WIN32
+#include <windows.h>
+
+static uint64_t
+os_uepoch(void)
+{
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    uint64_t tt = ft.dwHighDateTime;
+    tt <<= 32;
+    tt |= ft.dwLowDateTime;
+    tt /=10;
+    tt -= UINT64_C(11644473600000000);
+    return tt;
+}
+
+static size_t
+os_physical_memory(void)
+{
+    MEMORYSTATUSEX status = {.dwLength = sizeof(status)};
+    GlobalMemoryStatusEx(&status);
+    return status.ullTotalPhys;
+}
+#endif
+
+#include "tables.h"
 
 static int
 hex_to_bit(int q, int r)
@@ -17,18 +61,6 @@ hex_to_bit(int q, int r)
     else
         return store_map[q + 4][r + 4];
 }
-
-#ifdef __unix__
-#include <sys/time.h>
-
-static uint64_t
-uepoch(void)
-{
-    struct timeval tv;
-    gettimeofday(&tv, 0);
-    return UINT64_C(1000000) * tv.tv_sec + tv.tv_usec;
-}
-#endif
 
 static uint64_t
 rotl(const uint64_t x, int k)
@@ -266,7 +298,7 @@ mcts_playout(struct mcts *m, uint32_t node, const uint64_t s[2], int turn)
 static int
 mcts_choose(struct mcts *m, uint64_t timeout_usec)
 {
-    uint64_t stop = uepoch() + timeout_usec;
+    uint64_t stop = os_uepoch() + timeout_usec;
     int r;
     do {
         for (int i = 0; i < 1024; i++) {
@@ -274,7 +306,7 @@ mcts_choose(struct mcts *m, uint64_t timeout_usec)
             if (r < 0)
                 break;
         }
-    } while (r >= 0 && uepoch() < stop);
+    } while (r >= 0 && os_uepoch() < stop);
     if (r < 0)
         fprintf(stderr, "note: early bailout, out of memory\n");
 
@@ -314,8 +346,16 @@ main(void)
     uint64_t board[2] = {0, 0};
     unsigned turn = 0;
 
-    size_t size = MEMORY_GB * 1024 * 1024 * 1024;
-    struct mcts *mcts = mcts_init(malloc(size), size, board, turn);
+    size_t physical_memory = os_physical_memory();
+    size_t size = physical_memory;
+    void *buf;
+    do {
+        size *= 0.8f;
+        buf = malloc(size);
+    } while (!buf);
+    printf("%zu MB physical memory found, AI will use %zu MB\n",
+           physical_memory / 1024 / 1024, size / 1024 / 1024);
+    struct mcts *mcts = mcts_init(buf, size, board, turn);
 
     for (;;) {
         display(board[0], board[1], 0);
