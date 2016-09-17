@@ -175,7 +175,7 @@ struct mcts {
         uint32_t playouts[61];    // number of playouts for this play
         uint32_t next[61];        // next node when taking this play
         int8_t   avail_plays[61]; // list of valid plays for this node
-        unsigned nplays : 6;      // number of plays for this node
+        unsigned nplays : 7;      // number of plays for this node
         unsigned ucb1_mode : 1;   // set if all plays have been explored
     } nodes[];
 };
