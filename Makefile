@@ -1,5 +1,5 @@
 HOST_CC     = $(CC)
-CFLAGS      = -std=c99 -Wall -Wextra -O3 -g3 -DLITERAL
+CFLAGS      = -std=c99 -Wall -Wextra -O3 -g3
 HOST_CFLAGS = $(CFLAGS)
 HOST_LDLIBS = -lm
 
