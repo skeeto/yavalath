@@ -5,8 +5,8 @@
 #include <string.h>
 #include <inttypes.h>
 
-#define TIMEOUT_USEC (2 * 1000000UL)
-#define C            2.0f
+#define TIMEOUT_USEC (5 * 1000000UL)
+#define C            0.2f
 
 #ifdef __unix__
 #include <sys/time.h>
