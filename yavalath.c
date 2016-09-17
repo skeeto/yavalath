@@ -161,6 +161,7 @@ check(uint64_t c, int p, uint64_t *where)
 }
 
 #define MCTS_NULL ((uint32_t)-1)
+#define MCTS_LEAF ((uint32_t)-2)
 struct mcts {
     uint64_t rng[2];              // random number state
     uint64_t root_state[2];       // board state at root node
@@ -211,7 +212,7 @@ mcts_alloc(struct mcts *m, uint64_t taken)
 static void
 mcts_free(struct mcts *m, uint32_t node)
 {
-    if (node != MCTS_NULL) {
+    if (node != MCTS_NULL && node != MCTS_LEAF) {
         struct mcts_node *n = m->nodes + node;
         for (int i = 0; i < 61; i++)
             mcts_free(m, n->next[i]);
@@ -259,7 +260,7 @@ mcts_advance(struct mcts *m, int tile)
     m->root = root->next[tile];
     root->next[tile] = MCTS_NULL; // prevents free
     mcts_free(m, old_root);
-    if (m->root == MCTS_NULL) {
+    if (m->root == MCTS_NULL || m->root == MCTS_LEAF) {
         /* never explored this branch, allocate it */
         uint64_t taken = m->root_state[0] | m->root_state[1];
         m->root = mcts_alloc(m, taken);
@@ -307,10 +308,12 @@ mcts_playout(struct mcts *m, uint32_t node, const uint64_t s[2], int turn)
             n->playouts[play]++;
             n->total_playouts++;
             n->wins[play]++;
+            n->next[play] = MCTS_LEAF;
             return turn;
         case CHECK_RESULT_LOSS:
             n->playouts[play]++;
             n->total_playouts++;
+            n->next[play] = MCTS_LEAF;
             return !turn;
         case CHECK_RESULT_NOTHING:
             break;
