@@ -1,10 +1,12 @@
+#include <math.h>
 #include <stdio.h>
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
 
-#define TIMEOUT_USEC 2000000
+#define TIMEOUT_USEC (2 * 1000000UL)
+#define C            2.0f
 
 #ifdef __unix__
 #include <sys/time.h>
@@ -168,11 +170,13 @@ struct mcts {
     uint32_t node_count;          // total nodes ever touched
     int root_turn;                // whose turn it is at root node
     struct mcts_node {
+        uint32_t total_playouts;  // number of playouts through this node
         uint32_t wins[61];        // win counter for each move
         uint32_t playouts[61];    // number of playouts for this play
         uint32_t next[61];        // next node when taking this play
         int8_t   avail_plays[61]; // list of valid plays for this node
-        uint8_t  nplays;          // number of plays for this node
+        unsigned nplays : 6;      // number of plays for this node
+        unsigned ucb1_mode : 1;   // set if all plays have been explored
     } nodes[];
 };
 
@@ -191,6 +195,8 @@ mcts_alloc(struct mcts *m, uint64_t taken)
     }
     struct mcts_node *n = m->nodes + nodei;
     n->nplays = 0;
+    n->total_playouts = 0;
+    n->ucb1_mode = 0;
     for (int i = 0; i < 61; i++) {
         if (!((taken >> i) & 1)) {
             n->avail_plays[n->nplays++] = i;
@@ -225,7 +231,7 @@ mcts_init(void *buf, size_t bufsize, uint64_t state[2], int turn)
     m->root_state[0] = state[0];
     m->root_state[1] = state[1];
     m->root_turn = turn;
-    uint64_t seed = 0; //uepoch(); FIXME
+    uint64_t seed = os_uepoch();
     m->rng[0] = splitmix64(&seed);
     m->rng[1] = splitmix64(&seed);
     return m->root == MCTS_NULL ? NULL : m;
@@ -262,11 +268,36 @@ mcts_advance(struct mcts *m, int tile)
 }
 
 static int
+mcts_check_ucb1(struct mcts_node *n)
+{
+    for (int i = 0; i < n->nplays; i++)
+        if (n->next[n->avail_plays[i]] == MCTS_NULL)
+            return 0;
+    return 1;
+}
+
+static int
 mcts_playout(struct mcts *m, uint32_t node, const uint64_t s[2], int turn)
 {
     uint64_t copy[2] = {s[0], s[1]};
     struct mcts_node *n = m->nodes + node;
-    int play = n->avail_plays[xoroshiro128plus(m->rng) % n->nplays];
+    int play;
+    float best = -1.0f;
+    if (n->ucb1_mode) {
+        play = -1;
+        float numerator = C * logf(n->total_playouts);
+        for (int i = 0; i < n->nplays; i++) {
+            int p = n->avail_plays[i];
+            float mean = n->wins[p] / (float)n->playouts[p];
+            float x = mean + sqrtf(numerator / n->playouts[p]);
+            if (x > best) {
+                best = x;
+                play = p;
+            }
+        }
+    } else {
+        play = n->avail_plays[xoroshiro128plus(m->rng) % n->nplays];
+    }
     assert(play >= 0 && play <= 61);
     uint64_t play_bit = UINT64_C(1) << play;
     copy[turn] |= play_bit;
@@ -274,10 +305,12 @@ mcts_playout(struct mcts *m, uint32_t node, const uint64_t s[2], int turn)
     switch (check(copy[turn], play, &dummy)) {
         case CHECK_RESULT_WIN:
             n->playouts[play]++;
+            n->total_playouts++;
             n->wins[play]++;
             return turn;
         case CHECK_RESULT_LOSS:
             n->playouts[play]++;
+            n->total_playouts++;
             return !turn;
         case CHECK_RESULT_NOTHING:
             break;
@@ -286,10 +319,13 @@ mcts_playout(struct mcts *m, uint32_t node, const uint64_t s[2], int turn)
         n->next[play] = mcts_alloc(m, copy[0] | copy[1]);
         if (n->next[play] == MCTS_NULL)
             return -1; // out of memory
+        n->ucb1_mode = mcts_check_ucb1(n);
     }
     int winner = mcts_playout(m, n->next[play], copy, !turn);
-    if (winner != -1)
+    if (winner != -1) {
         n->playouts[play]++;
+        n->total_playouts++;
+    }
     if (winner == turn)
         n->wins[play]++;
     return winner;
