@@ -15,7 +15,7 @@ hex_to_bit(int q, int r)
 }
 
 static void
-display(uint64_t w, uint64_t b)
+display(uint64_t w, uint64_t b, uint64_t highlight)
 {
     for (int q = -4; q <= 4; q++) {
         printf("%c ", 'a' + q + 4);
@@ -26,12 +26,17 @@ display(uint64_t w, uint64_t b)
             if (bit == -1)
                 fputs("  ", stdout);
             else {
+                int h = highlight >> bit & 1;
+                if (h)
+                    fputs("\x1b[91;1m", stdout);
                 if ((w >> bit) & 1)
                     putchar('o');
                 else if ((b >> bit) & 1)
                     putchar('x');
                 else
                     putchar('.');
+                if (h)
+                    fputs("\x1b[0m", stdout);
                 putchar(' ');
             }
         }
@@ -58,18 +63,23 @@ enum check_result {
 };
 
 static enum check_result
-check(uint64_t c, int p)
+check(uint64_t c, int p, uint64_t *where)
 {
     for (int i = 0; i < 12; i++) {
         uint64_t mask = pattern_win[p][i];
-        if (mask && (c & mask) == mask)
+        if (mask && (c & mask) == mask) {
+            *where = mask;
             return CHECK_RESULT_WIN;
+        }
     }
     for (int i = 0; i < 9; i++) {
         uint64_t mask = pattern_lose[p][i];
-        if (mask && (c & mask) == mask)
+        if (mask && (c & mask) == mask) {
+            *where = mask;
             return CHECK_RESULT_LOSS;
+        }
     }
+    *where = 0;
     return CHECK_RESULT_NOTHING;
 }
 
@@ -79,11 +89,11 @@ main(void)
     uint64_t board[2] = {0, 0};
     unsigned t = 0;
     for (;;) {
-        display(board[0], board[1]);
+        display(board[0], board[1], 0);
         int q, r;
         char line[64];
         do {
-            fputs("> ", stdout);
+            fputs("\n> ", stdout);
             fflush(stdout);
             fgets(line, sizeof(line), stdin);
         } while (!notation_to_hex(line, &q, &r));
@@ -93,18 +103,19 @@ main(void)
         } else if ((board[0] >> bit & 1) || (board[1] >> bit & 1)) {
             printf("Invalid move (tile not free)\n");
         } else {
+            uint64_t where;
             board[t & 1] |= UINT64_C(1) << bit;
-            switch (check(board[t & 1], bit)) {
+            switch (check(board[t & 1], bit, &where)) {
                 case CHECK_RESULT_NOTHING: {
                     t++;
                 } break;
                 case CHECK_RESULT_LOSS: {
-                display(board[0], board[1]);
+                display(board[0], board[1], where);
                 printf("player %c loses!\n", "ox"[t & 1]);
                 exit(0);
                 } break;
                 case CHECK_RESULT_WIN: {
-                    display(board[0], board[1]);
+                    display(board[0], board[1], where);
                     printf("player %c wins!\n", "ox"[t & 1]);
                 exit(0);
                 } break;
