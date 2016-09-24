@@ -93,7 +93,7 @@ splitmix64(uint64_t x[static 1])
 }
 
 static void
-display(uint64_t w, uint64_t b, uint64_t highlight)
+display(uint64_t w, uint64_t b, uint64_t highlight, int color)
 {
     for (int q = -4; q <= 4; q++) {
         printf("%c ", 'a' + q + 4);
@@ -106,7 +106,7 @@ display(uint64_t w, uint64_t b, uint64_t highlight)
             else {
                 int h = highlight >> bit & 1;
                 if (h)
-                    fputs("\x1b[91;1m", stdout);
+                    printf("\x1b[%d;1m", 90 + color);
                 if ((w >> bit) & 1)
                     putchar('o');
                 else if ((b >> bit) & 1)
@@ -439,8 +439,9 @@ main(void)
            physical_memory / 1024 / 1024, size / 1024 / 1024);
     struct mcts *mcts = mcts_init(buf, size, board, turn);
 
+    uint64_t last_play = 0;
     for (;;) {
-        display(board[0], board[1], 0);
+        display(board[0], board[1], last_play, 3);
         fflush(stdout);
         char line[64];
         int bit;
@@ -472,6 +473,7 @@ main(void)
                    100 * mcts->nodes_allocated / (double)mcts->nodes_avail);
             printf("root   = %" PRIu32 "\n", mcts->root);
         }
+        last_play = UINT64_C(1) << bit;
         mcts_advance(mcts, bit);
         uint64_t where;
         board[turn] |= UINT64_C(1) << bit;
@@ -480,12 +482,12 @@ main(void)
                 turn = !turn;
             } break;
             case CHECK_RESULT_LOSS: {
-                display(board[0], board[1], where);
+                display(board[0], board[1], where, 1);
                 printf("player %c loses!\n", "ox"[turn]);
                 exit(0);
             } break;
             case CHECK_RESULT_WIN: {
-                display(board[0], board[1], where);
+                display(board[0], board[1], where, 4);
                 printf("player %c wins!\n", "ox"[turn]);
                 exit(0);
             } break;
