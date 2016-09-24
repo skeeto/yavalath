@@ -6,6 +6,7 @@
 #include <inttypes.h>
 
 #define TIMEOUT_USEC (5 * 1000000UL)
+#define MEMORY_USAGE 0.8f
 #define C            0.2f
 
 #ifdef __unix__
@@ -83,7 +84,7 @@ xoroshiro128plus(uint64_t s[static 2])
 }
 
 static uint64_t
-splitmix64(uint64_t *x)
+splitmix64(uint64_t x[static 1])
 {
     uint64_t z = (*x += UINT64_C(0x9E3779B97F4A7C15));
     z = (z ^ (z >> 30)) * UINT64_C(0xBF58476D1CE4E5B9);
@@ -160,44 +161,84 @@ check(uint64_t c, int p, uint64_t *where)
     return CHECK_RESULT_NOTHING;
 }
 
+static uint64_t
+state_hash(uint64_t a, uint64_t b)
+{
+    uint64_t rng[2];
+    rng[0] = splitmix64(&a);
+    rng[1] = splitmix64(&b);
+    return xoroshiro128plus(rng);
+}
+
 #define MCTS_NULL ((uint32_t)-1)
 #define MCTS_LEAF ((uint32_t)-2)
 struct mcts {
     uint64_t rng[2];              // random number state
-    uint64_t root_state[2];       // board state at root node
     uint32_t root;                // root node index
     uint32_t free;                // index of head of free list
-    uint32_t node_avail;          // total nodes available
-    uint32_t node_count;          // total nodes ever touched
+    uint32_t nodes_avail;         // total nodes available
+    uint32_t nodes_allocated;     // total number allocated
     int root_turn;                // whose turn it is at root node
     struct mcts_node {
+        uint32_t head;            // head of hash list for this slot
+        uint32_t chain;           // next item in hash table list
+        uint64_t state[2];        // the game state at this node
         uint32_t total_playouts;  // number of playouts through this node
         uint32_t wins[61];        // win counter for each move
         uint32_t playouts[61];    // number of playouts for this play
         uint32_t next[61];        // next node when taking this play
+        uint16_t refcount;        // number of nodes referencing this node
+        uint8_t  ucb1_mode : 1;   // set if all plays have been explored
+        uint8_t  nplays;          // number of plays for this node
         int8_t   avail_plays[61]; // list of valid plays for this node
-        unsigned nplays : 7;      // number of plays for this node
-        unsigned ucb1_mode : 1;   // set if all plays have been explored
     } nodes[];
 };
 
 static uint32_t
-mcts_alloc(struct mcts *m, uint64_t taken)
+mcts_find(struct mcts *m, uint32_t list_head, const uint64_t state[2])
 {
-    uint32_t nodei;
-    if (m->free != MCTS_NULL) {
+    while (list_head != MCTS_NULL) {
+        struct mcts_node *n = m->nodes + list_head;
+        if (n->state[0] == state[0] && n->state[1] == state[1])
+            return list_head;
+        list_head = n->chain;
+    }
+    return MCTS_NULL;
+}
+
+static uint32_t
+mcts_alloc(struct mcts *m, const uint64_t state[2])
+{
+    uint64_t hash = state_hash(state[0], state[1]);
+    uint32_t *head = &m->nodes[hash % m->nodes_avail].head;
+    uint32_t nodei = mcts_find(m, *head, state);
+    if (nodei != MCTS_NULL) {
+        /* Node already exists, return it. */
+        assert(m->nodes[nodei].refcount > 0);
+        m->nodes[nodei].refcount++;
+        return nodei;
+    } if (m->free != MCTS_NULL) {
+        /* Allocate a node. */
         nodei = m->free;
-        m->free = m->nodes[m->free].next[0];
-    } else if (m->node_count < m->node_avail) {
-        nodei = m->node_count++;
+        m->free = m->nodes[m->free].chain;
     } else {
-        fprintf(stderr, "warning: out of memory\n");
         return MCTS_NULL;
     }
+
+    /* Initiaize the node. */
+    m->nodes_allocated++;
     struct mcts_node *n = m->nodes + nodei;
+    n->state[0] = state[0];
+    n->state[1] = state[1];
+    n->refcount = 1;
     n->nplays = 0;
     n->total_playouts = 0;
     n->ucb1_mode = 0;
+    n->chain = *head;
+    *head = nodei;
+
+    /* Compute available moves from state. */
+    uint64_t taken = state[0] | state[1];
     for (int i = 0; i < 61; i++) {
         if (!((taken >> i) & 1)) {
             n->avail_plays[n->nplays++] = i;
@@ -214,10 +255,23 @@ mcts_free(struct mcts *m, uint32_t node)
 {
     if (node != MCTS_NULL && node != MCTS_LEAF) {
         struct mcts_node *n = m->nodes + node;
-        for (int i = 0; i < 61; i++)
-            mcts_free(m, n->next[i]);
-        n->next[0] = m->free;
-        m->free = node;
+        assert(n->refcount);
+        if (--n->refcount == 0) {
+            m->nodes_allocated--;
+            for (int i = 0; i < 61; i++)
+                mcts_free(m, n->next[i]);
+            uint64_t hash = state_hash(n->state[0], n->state[1]);
+            uint32_t parent = m->nodes[hash % m->nodes_avail].head;
+            if (parent == node) {
+                m->nodes[hash % m->nodes_avail].head = n->chain;
+            } else {
+                while (m->nodes[parent].chain != node)
+                    parent = m->nodes[parent].chain;
+                m->nodes[parent].chain = n->chain;
+            }
+            n->chain = m->free;
+            m->free = node;
+        }
     }
 }
 
@@ -225,16 +279,19 @@ static struct mcts *
 mcts_init(void *buf, size_t bufsize, uint64_t state[2], int turn)
 {
     struct mcts *m = buf;
-    m->free = MCTS_NULL;
-    m->node_avail = (bufsize  - sizeof(*m)) / sizeof(m->nodes[0]);
-    m->node_count = 0;
-    m->root = mcts_alloc(m, state[0] | state[1]);
-    m->root_state[0] = state[0];
-    m->root_state[1] = state[1];
-    m->root_turn = turn;
+    m->nodes_avail = (bufsize  - sizeof(*m)) / sizeof(m->nodes[0]);
+    m->nodes_allocated = 0;
     uint64_t seed = os_uepoch();
     m->rng[0] = splitmix64(&seed);
     m->rng[1] = splitmix64(&seed);
+    m->free = 0;
+    for (uint32_t i = 0; i < m->nodes_avail; i++) {
+        m->nodes[i].head = MCTS_NULL;
+        m->nodes[i].chain = i + 1;
+    }
+    m->nodes[m->nodes_avail - 1].chain = MCTS_NULL;
+    m->root = mcts_alloc(m, state);
+    m->root_turn = turn;
     return m->root == MCTS_NULL ? NULL : m;
 }
 
@@ -255,16 +312,15 @@ mcts_advance(struct mcts *m, int tile)
     if (!mcts_is_valid(root, tile))
         fprintf(stderr, "error: invalid move, %d\n", tile);
     assert(mcts_is_valid(root, tile));
-    m->root_state[m->root_turn] |= UINT64_C(1) << tile;
+    uint64_t state[2] = {root->state[0], root->state[1]};
+    state[m->root_turn] |= UINT64_C(1) << tile;
     m->root_turn = !m->root_turn;
     m->root = root->next[tile];
-    root->next[tile] = MCTS_NULL; // prevents free
+    root->next[tile] = MCTS_NULL;  // prevents free
     mcts_free(m, old_root);
     if (m->root == MCTS_NULL || m->root == MCTS_LEAF) {
         /* never explored this branch, allocate it */
-        uint64_t taken = m->root_state[0] | m->root_state[1];
-        m->root = mcts_alloc(m, taken);
-        assert(m->root != MCTS_NULL);
+        m->root = mcts_alloc(m, state);
     }
 }
 
@@ -278,10 +334,10 @@ mcts_check_ucb1(struct mcts_node *n)
 }
 
 static int
-mcts_playout(struct mcts *m, uint32_t node, const uint64_t s[2], int turn)
+mcts_playout(struct mcts *m, uint32_t node, int turn)
 {
-    uint64_t copy[2] = {s[0], s[1]};
     struct mcts_node *n = m->nodes + node;
+    uint64_t copy[2] = {n->state[0], n->state[1]};
     int play;
     float best = -1.0f;
     if (n->ucb1_mode) {
@@ -319,12 +375,12 @@ mcts_playout(struct mcts *m, uint32_t node, const uint64_t s[2], int turn)
             break;
     }
     if (n->next[play] == MCTS_NULL) {
-        n->next[play] = mcts_alloc(m, copy[0] | copy[1]);
+        n->next[play] = mcts_alloc(m, copy);
         if (n->next[play] == MCTS_NULL)
             return -1; // out of memory
         n->ucb1_mode = mcts_check_ucb1(n);
     }
-    int winner = mcts_playout(m, n->next[play], copy, !turn);
+    int winner = mcts_playout(m, n->next[play], !turn);
     if (winner != -1) {
         n->playouts[play]++;
         n->total_playouts++;
@@ -338,16 +394,16 @@ static int
 mcts_choose(struct mcts *m, uint64_t timeout_usec)
 {
     uint64_t stop = os_uepoch() + timeout_usec;
-    int r;
+    int oom_notice = 0;
     do {
         for (int i = 0; i < 1024; i++) {
-            r = mcts_playout(m, m->root, m->root_state, m->root_turn);
-            if (r < 0)
-                break;
+            int r = mcts_playout(m, m->root, m->root_turn);
+            if (r < 0 && !oom_notice) {
+                fprintf(stderr, "note: out of memory, examining old paths\n");
+                oom_notice = 1;
+            }
         }
-    } while (r >= 0 && os_uepoch() < stop);
-    if (r < 0)
-        fprintf(stderr, "note: early bailout, out of memory\n");
+    } while (os_uepoch() < stop);
 
     int best = -1;
     float best_ratio = -1.0f;
@@ -365,20 +421,6 @@ mcts_choose(struct mcts *m, uint64_t timeout_usec)
     return best;
 }
 
-struct mcts_stats {
-    uint32_t free;
-    uint32_t used;
-};
-
-static void
-mcts_stats(struct mcts *m, struct mcts_stats *s)
-{
-    s->free = 0;
-    for (uint32_t p = m->free; p != MCTS_NULL; p = m->nodes[p].next[0])
-        s->free++;
-    s->used = m->node_count - s->free;
-}
-
 int
 main(void)
 {
@@ -389,7 +431,7 @@ main(void)
     size_t size = physical_memory;
     void *buf;
     do {
-        size *= 0.8f;
+        size *= MEMORY_USAGE;
         buf = malloc(size);
     } while (!buf);
     printf("%zu MB physical memory found, AI will use %zu MB\n",
@@ -398,6 +440,7 @@ main(void)
 
     for (;;) {
         display(board[0], board[1], 0);
+        fflush(stdout);
         char line[64];
         int bit;
         if (turn == 0) {
@@ -422,12 +465,11 @@ main(void)
             puts("AI is thinking ...");
             fflush(stdout);
             bit = mcts_choose(mcts, TIMEOUT_USEC);
-            struct mcts_stats stats;
-            mcts_stats(mcts, &stats);
-            printf("free  = %" PRIu32 "\n", stats.free);
-            printf("used  = %" PRIu32 "\n", stats.used);
-            printf("avail = %" PRIu32 "\n", mcts->node_avail);
-            printf("root  = %" PRIu32 "\n", mcts->root);
+            printf("avail  = %" PRIu32 "\n", mcts->nodes_avail);
+            printf("alloc  = %" PRIu32 " (%.3f%%)\n",
+                   mcts->nodes_allocated,
+                   100 * mcts->nodes_allocated / (double)mcts->nodes_avail);
+            printf("root   = %" PRIu32 "\n", mcts->root);
         }
         mcts_advance(mcts, bit);
         uint64_t where;
