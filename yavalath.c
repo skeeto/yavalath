@@ -7,7 +7,7 @@
 
 #define TIMEOUT_USEC (60 * 1000000UL)
 #define MEMORY_USAGE 0.8f
-#define C            0.2f
+#define C            2.0f
 
 #ifdef __unix__
 #include <sys/time.h>
