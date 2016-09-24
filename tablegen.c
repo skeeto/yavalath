@@ -30,7 +30,7 @@ main(void)
             int center_bit = store_map[q + 4][r + 4];
             if (center_bit == -1)
                 continue;
-            char hex_axes[] = {1, 0, 0, 1, -1, 1};
+            int hex_axes[] = {1, 0, 0, 1, -1, 1};
             for (int length = 3; length <= 4; length++) {
                 int maski = 0;
                 for (int d = 0; d < 3; d++) {
