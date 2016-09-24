@@ -436,6 +436,12 @@ main(void)
 {
     uint64_t board[2] = {0, 0};
     unsigned turn = 0;
+    enum player_type {
+        PLAYER_HUMAN,
+        PLAYER_AI
+    } player_type[2] = {
+        PLAYER_HUMAN, PLAYER_AI
+    };
 
     size_t physical_memory = os_physical_memory();
     size_t size = physical_memory;
@@ -453,29 +459,32 @@ main(void)
         display(board[0], board[1], last_play, 3);
         fflush(stdout);
         char line[64];
-        int bit;
-        if (turn == 0) {
-            for (;;) {
-                fputs("\n> ", stdout);
-                fflush(stdout);
-                fgets(line, sizeof(line), stdin);
-                int q, r;
-                if (notation_to_hex(line, &q, &r)) {
-                    bit = hex_to_bit(q, r);
-                    if (bit == -1) {
-                        printf("Invalid move (out of bounds)\n");
-                    } else if (((board[0] >> bit) & 1) ||
-                               ((board[1] >> bit) & 1)) {
-                        printf("Invalid move (tile not free)\n");
-                    } else {
-                        break;
+        int bit = -1;
+        switch (player_type[turn]) {
+            case PLAYER_HUMAN:
+                for (;;) {
+                    fputs("\n> ", stdout);
+                    fflush(stdout);
+                    fgets(line, sizeof(line), stdin);
+                    int q, r;
+                    if (notation_to_hex(line, &q, &r)) {
+                        bit = hex_to_bit(q, r);
+                        if (bit == -1) {
+                            printf("Invalid move (out of bounds)\n");
+                        } else if (((board[0] >> bit) & 1) ||
+                                   ((board[1] >> bit) & 1)) {
+                            printf("Invalid move (tile not free)\n");
+                        } else {
+                            break;
+                        }
                     }
                 }
-            }
-        } else {
-            puts("AI is thinking ...");
-            fflush(stdout);
-            bit = mcts_choose(mcts, TIMEOUT_USEC);
+                break;
+            case PLAYER_AI:
+                puts("AI is thinking ...");
+                fflush(stdout);
+                bit = mcts_choose(mcts, TIMEOUT_USEC);
+                break;
         }
         last_play = UINT64_C(1) << bit;
         mcts_advance(mcts, bit);
