@@ -465,7 +465,8 @@ main(void)
                 for (;;) {
                     fputs("\n> ", stdout);
                     fflush(stdout);
-                    fgets(line, sizeof(line), stdin);
+                    if (!fgets(line, sizeof(line), stdin))
+                        return -1; // EOF
                     int q, r;
                     if (notation_to_hex(line, &q, &r)) {
                         bit = hex_to_bit(q, r);
