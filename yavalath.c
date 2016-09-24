@@ -408,8 +408,9 @@ mcts_choose(struct mcts *m, uint64_t timeout_usec)
     int best = -1;
     float best_ratio = -1.0f;
     struct mcts_node *n = m->nodes + m->root;
+    uint64_t available = n->state[0] | n->state[1];
     for (int i = 0; i < 61; i++) {
-        if (n->playouts[i]) {
+        if (!((available >> i) & 1) && n->playouts[i]) {
             float ratio = n->wins[i] / (float)n->playouts[i];
             if (ratio > best_ratio) {
                 best = i;
