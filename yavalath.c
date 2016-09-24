@@ -396,12 +396,21 @@ mcts_choose(struct mcts *m, uint64_t timeout_usec)
     uint64_t stop = os_uepoch() + timeout_usec;
     int oom_notice = 0;
     do {
-        for (int i = 0; i < 1024; i++) {
+        int iterations = 64 * 1024;
+        int oom_count = 0;
+        for (int i = 0; i < iterations; i++) {
             int r = mcts_playout(m, m->root, m->root_turn);
-            if (r < 0 && !oom_notice) {
-                fprintf(stderr, "note: out of memory, examining old paths\n");
-                oom_notice = 1;
+            if (r < 0) {
+                oom_count++;
             }
+        }
+        if (oom_count == iterations) {
+            printf("note: no more progress made, bailing out\n");
+            break;
+        }
+        if (oom_count && !oom_notice) {
+            fprintf(stderr, "note: out of memory, examining old paths\n");
+            oom_notice = 1;
         }
     } while (os_uepoch() < stop);
 
