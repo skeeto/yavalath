@@ -476,11 +476,6 @@ main(void)
             puts("AI is thinking ...");
             fflush(stdout);
             bit = mcts_choose(mcts, TIMEOUT_USEC);
-            printf("avail  = %" PRIu32 "\n", mcts->nodes_avail);
-            printf("alloc  = %" PRIu32 " (%.3f%%)\n",
-                   mcts->nodes_allocated,
-                   100 * mcts->nodes_allocated / (double)mcts->nodes_avail);
-            printf("root   = %" PRIu32 "\n", mcts->root);
         }
         last_play = UINT64_C(1) << bit;
         mcts_advance(mcts, bit);
