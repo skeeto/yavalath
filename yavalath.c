@@ -44,6 +44,12 @@ os_restart_line(void)
     puts("\x1b[F");
 }
 
+static void
+os_finish(void)
+{
+    // nothing
+}
+
 #elif _WIN32
 #include <windows.h>
 
@@ -89,6 +95,12 @@ os_restart_line(void)
     GetConsoleScreenBufferInfo(out, &info);
     info.dwCursorPosition.X = 0;
     SetConsoleCursorPosition(out, info.dwCursorPosition);
+}
+
+static void
+os_finish(void)
+{
+    getchar(); // leave window open
 }
 #endif
 
@@ -599,8 +611,6 @@ main(void)
 
 done:
     free(mcts);
-    #ifdef _WIN32
-    getchar(); // leave window open on Windows
-    #endif
+    os_finish();
     return 0;
 }
