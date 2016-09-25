@@ -9,6 +9,10 @@
 #define MEMORY_USAGE 0.8f
 #define C            2.0f
 
+static const int8_t store_map[61][9];
+static const uint64_t pattern_lose[61][9];
+static const uint64_t pattern_win[61][12];
+
 #ifdef __unix__
 #include <sys/time.h>
 #include <unistd.h>
@@ -53,8 +57,6 @@ os_physical_memory(void)
     return status.ullTotalPhys;
 }
 #endif
-
-#include "tables.h"
 
 static int
 hex_to_bit(int q, int r)
@@ -511,3 +513,5 @@ main(void)
     free(mcts);
     return 0;
 }
+
+#include "tables.h"

@@ -12,5 +12,10 @@ tables.h : tablegen
 tablegen : tablegen.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LDLIBS)
 
+yavalath_all.c : yavalath.c tables.h
+	head -n -1 $< | cat - tables.h > $@
+
+amalgamation : yavalath_all.c
+
 clean :
-	$(RM) yavalath tablegen tables.h
+	$(RM) yavalath tablegen tables.h yavalath_all.c
