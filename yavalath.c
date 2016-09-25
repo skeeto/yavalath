@@ -468,9 +468,12 @@ main(void)
         size *= MEMORY_USAGE;
         buf = malloc(size);
     } while (!buf);
-    printf("%zu MB physical memory found, AI will use %zu MB\n",
-           physical_memory / 1024 / 1024, size / 1024 / 1024);
     struct mcts *mcts = mcts_init(buf, size, board, turn);
+    printf("%zu MB physical memory found, "
+           "AI will use %zu MB (%" PRIu32 " nodes)\n",
+           physical_memory / 1024 / 1024,
+           size / 1024 / 1024,
+           mcts->nodes_avail);
 
     uint64_t last_play = 0;
     for (;;) {
