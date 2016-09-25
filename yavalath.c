@@ -38,6 +38,12 @@ os_color(int color)
         fputs("\x1b[0m", stdout);
 }
 
+static void
+os_restart_line(void)
+{
+    puts("\x1b[F");
+}
+
 #elif _WIN32
 #include <windows.h>
 
@@ -73,6 +79,16 @@ os_color(int color)
     if (!color || color & 0x4)
         bits |= FOREGROUND_BLUE;
     SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), bits);
+}
+
+static void
+os_restart_line(void)
+{
+    HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO info;
+    GetConsoleScreenBufferInfo(out, &info);
+    info.dwCursorPosition.X = 0;
+    SetConsoleCursorPosition(out, info.dwCursorPosition);
 }
 #endif
 
@@ -202,6 +218,7 @@ struct mcts {
     uint32_t nodes_avail;         // total nodes available
     uint32_t nodes_allocated;     // total number allocated
     int root_turn;                // whose turn it is at root node
+    uint32_t step_iterations;     // playouts to make between time checks
     struct mcts_node {
         uint32_t head;            // head of hash list for this slot
         uint32_t chain;           // next item in hash table list
@@ -301,6 +318,7 @@ mcts_init(void *buf, size_t bufsize, uint64_t state[2], int turn)
     uint64_t seed = os_uepoch();
     m->rng[0] = splitmix64(&seed);
     m->rng[1] = splitmix64(&seed);
+    m->step_iterations = 64 * 1024;
     m->free = 0;
     for (uint32_t i = 0; i < m->nodes_avail; i++) {
         m->nodes[i].head = MCTS_NULL;
@@ -453,18 +471,27 @@ mcts_choose(struct mcts *m, uint64_t timeout_usec)
     uint64_t stop = os_uepoch() + timeout_usec;
     int oom = 0;
     do {
-        // TODO: dynamically adjust iterations
-        for (int i = 0; i < 64 * 1024; i++) {
+        uint64_t playout_start = os_uepoch();
+        for (uint32_t i = 0; i < m->step_iterations; i++) {
             int r = mcts_playout(m, m->root, m->root_turn);
             if (r < 0) {
                 oom = 1;
                 break;
             }
         }
-        printf("%.2f%% memory usage, %" PRIu32 "\n",
+        uint64_t playout_time = os_uepoch() - playout_start;
+        if (playout_time > 300000)
+            m->step_iterations *= 0.85f;
+        else if (playout_time < 250000)
+            m->step_iterations *= 1.18f;
+
+        os_restart_line();
+        printf("%.2f%% memory usage, %" PRIu32 " playouts",
                100 * m->nodes_allocated / (double)m->nodes_avail,
                m->nodes[m->root].total_playouts);
+        fflush(stdout);
     } while (!oom && os_uepoch() < stop);
+    puts(" ... done\n");
 
     int best = -1;
     float best_ratio = -1.0f;
@@ -538,8 +565,7 @@ main(void)
                 }
                 break;
             case PLAYER_AI:
-                puts("AI is thinking ...");
-                fflush(stdout);
+                putchar('\n');
                 bit = mcts_choose(mcts, TIMEOUT_USEC);
                 break;
         }
