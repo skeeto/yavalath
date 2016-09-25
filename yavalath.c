@@ -512,16 +512,18 @@ mcts_choose(struct mcts *m, uint64_t timeout_usec)
                 break;
             }
         }
-        uint64_t playout_time = os_uepoch() - playout_start;
+        uint64_t playout_end = os_uepoch();
+        uint64_t playout_time = playout_end - playout_start;
         if (playout_time > 300000)
             m->step_iterations *= 0.85f;
         else if (playout_time < 250000)
             m->step_iterations *= 1.18f;
 
         os_restart_line();
-        printf("%.2f%% memory usage, %" PRIu32 " playouts",
+        printf("%.2f%% memory usage, %" PRIu32 " playouts, %0.1fs remaining",
                100 * m->nodes_allocated / (double)m->nodes_avail,
-               m->nodes[m->root].total_playouts);
+               m->nodes[m->root].total_playouts,
+               stop / 1e6 - playout_end / 1e6);
         fflush(stdout);
     } while (!oom && os_uepoch() < stop);
     puts(" ... done\n");
