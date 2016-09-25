@@ -25,8 +25,8 @@ For example, the upper-left tile is `a1` and the bottom-right tile is
         i . . . . . 6
            1 2 3 4 5
 
-The AI is still ... awful. I'm working on it. It's a [UCT Monte Carlo
-tree search][mcts].
+The AI is a [UCT Monte Carlo tree search][mcts] and it's very strong,
+especially if given plenty of memory and time.
 
 
 [yl]: http://www.cameronius.com/games/yavalath/
