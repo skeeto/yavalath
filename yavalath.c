@@ -192,8 +192,9 @@ state_hash(uint64_t a, uint64_t b)
     return xoroshiro128plus(rng);
 }
 
-#define MCTS_NULL ((uint32_t)-1)
-#define MCTS_LEAF ((uint32_t)-2)
+#define MCTS_NULL      ((uint32_t)-1)
+#define MCTS_LEAF      ((uint32_t)-2)
+#define MCTS_UCB1_FLAG (1 << 0)
 struct mcts {
     uint64_t rng[2];              // random number state
     uint32_t root;                // root node index
@@ -211,7 +212,7 @@ struct mcts {
         uint32_t next[61];        // next node when taking this play
         uint16_t refcount;        // number of nodes referencing this node
         uint8_t  nplays;          // number of plays for this node
-        int      ucb1_mode : 1;   // set if all plays have been explored
+        uint8_t  flags;
         int8_t   avail_plays[61]; // list of valid plays for this node
     } nodes[];
 };
@@ -243,19 +244,19 @@ mcts_alloc(struct mcts *m, const uint64_t state[2])
         /* Allocate a node. */
         nodei = m->free;
         m->free = m->nodes[m->free].chain;
+        m->nodes_allocated++;
     } else {
         return MCTS_NULL;
     }
 
     /* Initiaize the node. */
-    m->nodes_allocated++;
     struct mcts_node *n = m->nodes + nodei;
     n->state[0] = state[0];
     n->state[1] = state[1];
     n->refcount = 1;
     n->nplays = 0;
     n->total_playouts = 0;
-    n->ucb1_mode = 0;
+    n->flags = 0;
     n->chain = *head;
     *head = nodei;
 
@@ -317,23 +318,13 @@ mcts_init(void *buf, size_t bufsize, uint64_t state[2], int turn)
     return m->root == MCTS_NULL ? NULL : m;
 }
 
-static int
-mcts_is_valid(struct mcts_node *n, int tile)
-{
-    for (int i = 0; i < n->nplays; i++)
-        if (n->avail_plays[i] == tile)
-            return 1;
-    return 0;
-}
-
 static void
 mcts_advance(struct mcts *m, int tile)
 {
     uint32_t old_root = m->root;
     struct mcts_node *root = m->nodes + old_root;
-    if (!mcts_is_valid(root, tile))
+    if (((root->state[0] | root->state[1]) >> tile) & 1)
         fprintf(stderr, "error: invalid move, %d\n", tile);
-    assert(mcts_is_valid(root, tile));
     uint64_t state[2] = {root->state[0], root->state[1]};
     state[m->root_turn] |= UINT64_C(1) << tile;
     m->root_turn = !m->root_turn;
@@ -362,7 +353,7 @@ mcts_playout(struct mcts *m, uint32_t node, int turn)
     uint64_t copy[2] = {n->state[0], n->state[1]};
     int play;
     float best = -1.0f;
-    if (n->ucb1_mode) {
+    if (n->flags & MCTS_UCB1_FLAG) {
         play = -1;
         float numerator = MCTS_C * logf(n->total_playouts);
         for (int i = 0; i < n->nplays; i++) {
@@ -400,7 +391,8 @@ mcts_playout(struct mcts *m, uint32_t node, int turn)
         n->next[play] = mcts_alloc(m, copy);
         if (n->next[play] == MCTS_NULL)
             return -1; // out of memory
-        n->ucb1_mode = mcts_check_ucb1(n);
+        if (mcts_check_ucb1(n))
+            n->flags |= MCTS_UCB1_FLAG;
     }
     int winner = mcts_playout(m, n->next[play], !turn);
     if (winner != -1) {
