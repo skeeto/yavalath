@@ -7,7 +7,7 @@
 
 #define TIMEOUT_USEC (60 * 1000000UL)
 #define MEMORY_USAGE 0.8f
-#define C            2.0f
+#define MCTS_C       2.0f
 
 #ifdef __unix__
 #include <sys/time.h>
@@ -342,7 +342,7 @@ mcts_playout(struct mcts *m, uint32_t node, int turn)
     float best = -1.0f;
     if (n->ucb1_mode) {
         play = -1;
-        float numerator = C * logf(n->total_playouts);
+        float numerator = MCTS_C * logf(n->total_playouts);
         for (int i = 0; i < n->nplays; i++) {
             int p = n->avail_plays[i];
             float mean = n->wins[p] / (float)n->playouts[p];
