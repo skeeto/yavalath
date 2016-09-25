@@ -331,11 +331,12 @@ mcts_advance(struct mcts *m, int tile)
 static int
 random_play(uint64_t *rng, uint64_t taken)
 {
+    taken |= UINT64_C(7) << 61; // set high bits as "taken"
     for (;;) {
         uint64_t random = xoroshiro128plus(rng);
         for (int i = 0; i < 10; i++) {
             int candidate = (random >> (6 * i)) & 0x3f;
-            if (candidate < 61 && !((taken >> candidate) & 1))
+            if (!((taken >> candidate) & 1))
                 return candidate;
         }
     }
