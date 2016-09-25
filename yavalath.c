@@ -388,20 +388,25 @@ mcts_playout(struct mcts *m, uint32_t node, int turn)
     if (!n->unexplored) {
         /* Use upper confidence bound (UCB1). */
         uint64_t taken = n->state[0] | n->state[1];
-        float best = -1.0f;
+        float best_x = -1.0f;
         float numerator = MCTS_C * logf(n->total_playouts);
-        // TODO: randomly break ties
+        int best[61];
+        int nbest = 0;
         for (int i = 0; i < 61; i++) {
             if (!((taken >> i) & 1)) {
                 assert(n->playouts[i]);
                 float mean = n->wins[i] / (float)n->playouts[i];
                 float x = mean + sqrtf(numerator / n->playouts[i]);
-                if (x > best) {
-                    best = x;
-                    play = i;
+                if (x > best_x) {
+                    best_x = x;
+                    nbest = 1;
+                    best[0] = i;
+                } else if (x == best_x) {
+                    best[nbest++] = i;
                 }
             }
         }
+        play = nbest == 1 ? best[0] : best[xoroshiro128plus(m->rng) % nbest];
         int winner = mcts_playout(m, n->next[play], !turn);
         if (winner != -1) {
             n->playouts[play]++;
@@ -493,22 +498,24 @@ mcts_choose(struct mcts *m, uint64_t timeout_usec)
     } while (!oom && os_uepoch() < stop);
     puts(" ... done\n");
 
-    int best = -1;
-    float best_ratio = -1.0f;
+    double best_ratio = -1.0;
     struct mcts_node *n = m->nodes + m->root;
     uint64_t available = n->state[0] | n->state[1];
-    // TODO: randomly break ties
+    int best[61];
+    int nbest = 0;
     for (int i = 0; i < 61; i++) {
         if (!((available >> i) & 1) && n->playouts[i]) {
-            float ratio = n->wins[i] / (float)n->playouts[i];
+            double ratio = n->wins[i] / (double)n->playouts[i];
             if (ratio > best_ratio) {
-                best = i;
+                nbest = 1;
+                best[0] = i;
                 best_ratio = ratio;
+            } else if (ratio == best_ratio) {
+                best[nbest++] = i;
             }
         }
     }
-    assert(best != -1);
-    return best;
+    return nbest == 1 ? best[0] : best[xoroshiro128plus(m->rng) % nbest];
 }
 
 int
