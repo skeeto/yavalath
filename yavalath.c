@@ -402,6 +402,8 @@ mcts_playout(struct mcts *m, uint32_t node, int turn)
     assert(node != MCTS_NULL);
 
     struct mcts_node *n = m->nodes + node;
+    if (n->total_playouts == UINT32_MAX)
+        return -2; // more playouts would overflow
     int play = -1;
     if (!n->unexplored) {
         /* Use upper confidence bound (UCB1). */
@@ -426,7 +428,7 @@ mcts_playout(struct mcts *m, uint32_t node, int turn)
         }
         play = nbest == 1 ? best[0] : best[xoroshiro128plus(m->rng) % nbest];
         int winner = mcts_playout(m, n->next[play], !turn);
-        if (winner != -1) {
+        if (winner >= 0) {
             n->playouts[play]++;
             n->total_playouts++;
         }
