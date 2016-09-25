@@ -13,7 +13,7 @@ tablegen : tablegen.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LDLIBS)
 
 yavalath_all.c : yavalath.c tables.h
-	head -n -1 $< | cat - tables.h > $@
+	sed 's/^#include "tables.h"//' $< | cat tables.h - > $@
 
 amalgamation : yavalath_all.c
 
