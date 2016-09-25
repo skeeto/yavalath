@@ -29,6 +29,15 @@ os_physical_memory(void)
     return pages * page_size;
 }
 
+static void
+os_color(int color)
+{
+    if (color)
+        printf("\x1b[%d;1m", 90 + color);
+    else
+        fputs("\x1b[0m", stdout);
+}
+
 #elif _WIN32
 #include <windows.h>
 
@@ -51,6 +60,19 @@ os_physical_memory(void)
     MEMORYSTATUSEX status = {.dwLength = sizeof(status)};
     GlobalMemoryStatusEx(&status);
     return status.ullTotalPhys;
+}
+
+static void
+os_color(int color)
+{
+    WORD bits = color ? FOREGROUND_INTENSITY : 0;
+    if (!color || color & 0x1)
+        bits |= FOREGROUND_RED;
+    if (!color || color & 0x2)
+        bits |= FOREGROUND_GREEN;
+    if (!color || color & 0x4)
+        bits |= FOREGROUND_BLUE;
+    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), bits);
 }
 #endif
 
@@ -106,7 +128,7 @@ display(uint64_t w, uint64_t b, uint64_t highlight, int color)
             else {
                 int h = highlight >> bit & 1;
                 if (h)
-                    printf("\x1b[%d;1m", 90 + color);
+                    os_color(color);
                 if ((w >> bit) & 1)
                     putchar('o');
                 else if ((b >> bit) & 1)
@@ -114,7 +136,7 @@ display(uint64_t w, uint64_t b, uint64_t highlight, int color)
                 else
                     putchar('.');
                 if (h)
-                    fputs("\x1b[0m", stdout);
+                    os_color(0);
                 putchar(' ');
             }
         }
