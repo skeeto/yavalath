@@ -211,9 +211,7 @@ struct mcts {
         uint32_t playouts[61];    // number of playouts for this play
         uint32_t next[61];        // next node when taking this play
         uint16_t refcount;        // number of nodes referencing this node
-        uint8_t  nplays;          // number of plays for this node
         uint8_t  flags;
-        int8_t   avail_plays[61]; // list of valid plays for this node
     } nodes[];
 };
 
@@ -254,20 +252,13 @@ mcts_alloc(struct mcts *m, const uint64_t state[2])
     n->state[0] = state[0];
     n->state[1] = state[1];
     n->refcount = 1;
-    n->nplays = 0;
     n->total_playouts = 0;
     n->flags = 0;
     n->chain = *head;
     *head = nodei;
-
-    /* Compute available moves from state. */
-    uint64_t taken = state[0] | state[1];
     for (int i = 0; i < 61; i++) {
-        if (!((taken >> i) & 1)) {
-            n->avail_plays[n->nplays++] = i;
-            n->wins[i] = 0;
-            n->playouts[i] = 0;
-        }
+        n->wins[i] = 0;
+        n->playouts[i] = 0;
         n->next[i] = MCTS_NULL;
     }
     return nodei;
@@ -338,12 +329,16 @@ mcts_advance(struct mcts *m, int tile)
 }
 
 static int
-mcts_check_ucb1(struct mcts_node *n)
+random_play(uint64_t *rng, uint64_t taken)
 {
-    for (int i = 0; i < n->nplays; i++)
-        if (n->next[n->avail_plays[i]] == MCTS_NULL)
-            return 0;
-    return 1;
+    for (;;) {
+        uint64_t random = xoroshiro128plus(rng);
+        for (int i = 0; i < 10; i++) {
+            int candidate = (random >> (6 * i)) & 0x3f;
+            if (candidate < 61 && !((taken >> candidate) & 1))
+                return candidate;
+        }
+    }
 }
 
 static int
@@ -353,20 +348,22 @@ mcts_playout(struct mcts *m, uint32_t node, int turn)
     uint64_t copy[2] = {n->state[0], n->state[1]};
     int play;
     float best = -1.0f;
+    uint64_t taken = n->state[0] | n->state[1];
     if (n->flags & MCTS_UCB1_FLAG) {
         play = -1;
         float numerator = MCTS_C * logf(n->total_playouts);
-        for (int i = 0; i < n->nplays; i++) {
-            int p = n->avail_plays[i];
-            float mean = n->wins[p] / (float)n->playouts[p];
-            float x = mean + sqrtf(numerator / n->playouts[p]);
-            if (x > best) {
-                best = x;
-                play = p;
+        for (int i = 0; i < 61; i++) {
+            if (!((taken >> i) & 1)) {
+                float mean = n->wins[i] / (float)n->playouts[i];
+                float x = mean + sqrtf(numerator / n->playouts[i]);
+                if (x > best) {
+                    best = x;
+                    play = i;
+                }
             }
         }
     } else {
-        play = n->avail_plays[xoroshiro128plus(m->rng) % n->nplays];
+        play = random_play(m->rng, taken);
     }
     assert(play >= 0 && play <= 61);
     uint64_t play_bit = UINT64_C(1) << play;
@@ -391,7 +388,14 @@ mcts_playout(struct mcts *m, uint32_t node, int turn)
         n->next[play] = mcts_alloc(m, copy);
         if (n->next[play] == MCTS_NULL)
             return -1; // out of memory
-        if (mcts_check_ucb1(n))
+        int full = 1;
+        for (int i = 0; i < 61; i++) {
+            if (!((taken >> i) & 1) && n->next[i] == MCTS_NULL) {
+                full = 0;
+                break;
+            }
+        }
+        if (full)
             n->flags |= MCTS_UCB1_FLAG;
     }
     int winner = mcts_playout(m, n->next[play], !turn);
