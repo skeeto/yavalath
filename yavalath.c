@@ -520,16 +520,20 @@ main(void)
             case CHECK_RESULT_LOSS: {
                 display(board[0], board[1], where, 1);
                 printf("player %c loses!\n", "ox"[turn]);
-                exit(0);
+                goto done;
             } break;
             case CHECK_RESULT_WIN: {
                 display(board[0], board[1], where, 4);
                 printf("player %c wins!\n", "ox"[turn]);
-                exit(0);
+                goto done;
             } break;
         }
     }
 
+done:
     free(mcts);
+    #ifdef _WIN32
+    getchar(); // leave window open on Windows
+    #endif
     return 0;
 }
