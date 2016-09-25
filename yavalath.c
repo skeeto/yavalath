@@ -185,29 +185,32 @@ notation_to_hex(const char *s, int *q, int *r)
 }
 
 enum check_result {
-    CHECK_RESULT_LOSS = -1,
-    CHECK_RESULT_NOTHING = 0,
-    CHECK_RESULT_WIN = 1,
+    CHECK_RESULT_NOTHING,
+    CHECK_RESULT_WIN,
+    CHECK_RESULT_LOSS,
+    CHECK_RESULT_DRAW,
 };
 
 static enum check_result
-check(uint64_t c, int p, uint64_t *where)
+check(uint64_t who, uint64_t opponent, int where, uint64_t *how)
 {
     for (int i = 0; i < 12; i++) {
-        uint64_t mask = pattern_win[p][i];
-        if (mask && (c & mask) == mask) {
-            *where = mask;
+        uint64_t mask = pattern_win[where][i];
+        if (mask && (who & mask) == mask) {
+            *how = mask;
             return CHECK_RESULT_WIN;
         }
     }
     for (int i = 0; i < 9; i++) {
-        uint64_t mask = pattern_lose[p][i];
-        if (mask && (c & mask) == mask) {
-            *where = mask;
+        uint64_t mask = pattern_lose[where][i];
+        if (mask && (who & mask) == mask) {
+            *how = mask;
             return CHECK_RESULT_LOSS;
         }
     }
-    *where = 0;
+    *how = 0;
+    if ((who | opponent) == UINT64_C(0x1fffffffffffffff))
+        return CHECK_RESULT_DRAW;
     return CHECK_RESULT_NOTHING;
 }
 
@@ -221,8 +224,9 @@ state_hash(uint64_t a, uint64_t b)
 }
 
 #define MCTS_NULL      ((uint32_t)-1)
-#define MCTS_WIN0      ((uint32_t)-2)
-#define MCTS_WIN1      ((uint32_t)-3)
+#define MCTS_DRAW      ((uint32_t)-2)
+#define MCTS_WIN0      ((uint32_t)-3)
+#define MCTS_WIN1      ((uint32_t)-4)
 struct mcts {
     uint64_t rng[2];              // random number state
     uint32_t root;                // root node index
@@ -393,6 +397,8 @@ mcts_playout(struct mcts *m, uint32_t node, int turn)
         return 0;
     else if (node == MCTS_WIN1)
         return 1;
+    else if (node == MCTS_DRAW)
+        return 100;
     assert(node != MCTS_NULL);
 
     struct mcts_node *n = m->nodes + node;
@@ -434,7 +440,7 @@ mcts_playout(struct mcts *m, uint32_t node, int turn)
         uint64_t next_state[2] = {n->state[0], n->state[1]};
         next_state[turn] |= UINT64_C(1) << play;
         uint64_t dummy;
-        switch (check(next_state[turn], play, &dummy)) {
+        switch (check(next_state[turn], next_state[!turn], play, &dummy)) {
             case CHECK_RESULT_WIN:
                 n->playouts[play]++;
                 n->total_playouts++;
@@ -448,6 +454,12 @@ mcts_playout(struct mcts *m, uint32_t node, int turn)
                 n->next[play] = turn ? MCTS_WIN0 : MCTS_WIN1;
                 n->unexplored--;
                 return !turn;
+            case CHECK_RESULT_DRAW:
+                n->playouts[play]++;
+                n->total_playouts++;
+                n->next[play] = MCTS_DRAW;
+                n->unexplored--;
+                return 100; // neither
             case CHECK_RESULT_NOTHING:
                 n->next[play] = mcts_alloc(m, next_state);
                 if (n->next[play] == MCTS_NULL)
@@ -466,7 +478,7 @@ mcts_playout(struct mcts *m, uint32_t node, int turn)
             int play = random_play_simple(taken, m->rng);
             next_state[turn] |= UINT64_C(1) << play;
             uint64_t dummy;
-            switch (check(next_state[turn], play, &dummy)) {
+            switch (check(next_state[turn], next_state[!turn], play, &dummy)) {
                 case CHECK_RESULT_WIN:
                     if (turn == parent_turn)
                         n->wins[parent_slot]++;
@@ -475,6 +487,8 @@ mcts_playout(struct mcts *m, uint32_t node, int turn)
                     if (turn != parent_turn)
                         n->wins[parent_slot]++;
                     return !turn;
+                case CHECK_RESULT_DRAW:
+                    return 100;
                 case CHECK_RESULT_NOTHING:
                     break;
             }
@@ -592,7 +606,7 @@ main(void)
         mcts_advance(mcts, bit);
         uint64_t where;
         board[turn] |= UINT64_C(1) << bit;
-        switch (check(board[turn], bit, &where)) {
+        switch (check(board[turn], board[!turn], bit, &where)) {
             case CHECK_RESULT_NOTHING: {
                 turn = !turn;
             } break;
@@ -604,6 +618,11 @@ main(void)
             case CHECK_RESULT_WIN: {
                 display(board[0], board[1], where, 4);
                 printf("player %c wins!\n", "ox"[turn]);
+                goto done;
+            } break;
+            case CHECK_RESULT_DRAW: {
+                display(board[0], board[1], where, 5);
+                printf("draw game!\n");
                 goto done;
             } break;
         }
