@@ -74,7 +74,7 @@ rotl(const uint64_t x, int k)
 }
 
 static uint64_t
-xoroshiro128plus(uint64_t s[static 2])
+xoroshiro128plus(uint64_t *s)
 {
     const uint64_t s0 = s[0];
     uint64_t s1 = s[1];
@@ -86,7 +86,7 @@ xoroshiro128plus(uint64_t s[static 2])
 }
 
 static uint64_t
-splitmix64(uint64_t x[static 1])
+splitmix64(uint64_t *x)
 {
     uint64_t z = (*x += UINT64_C(0x9E3779B97F4A7C15));
     z = (z ^ (z >> 30)) * UINT64_C(0xBF58476D1CE4E5B9);
@@ -190,8 +190,8 @@ struct mcts {
         uint32_t playouts[61];    // number of playouts for this play
         uint32_t next[61];        // next node when taking this play
         uint16_t refcount;        // number of nodes referencing this node
-        uint8_t  ucb1_mode : 1;   // set if all plays have been explored
         uint8_t  nplays;          // number of plays for this node
+        int      ucb1_mode : 1;   // set if all plays have been explored
         int8_t   avail_plays[61]; // list of valid plays for this node
     } nodes[];
 };
