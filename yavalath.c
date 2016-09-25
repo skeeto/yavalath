@@ -5,7 +5,7 @@
 #include <string.h>
 #include <inttypes.h>
 
-#define TIMEOUT_USEC (60 * 1000000UL)
+#define TIMEOUT_USEC (10 * 1000000UL)
 #define MEMORY_USAGE 0.8f
 #define MCTS_C       2.0f
 
@@ -193,8 +193,8 @@ state_hash(uint64_t a, uint64_t b)
 }
 
 #define MCTS_NULL      ((uint32_t)-1)
-#define MCTS_LEAF      ((uint32_t)-2)
-#define MCTS_UCB1_FLAG (1 << 0)
+#define MCTS_WIN0      ((uint32_t)-2)
+#define MCTS_WIN1      ((uint32_t)-3)
 struct mcts {
     uint64_t rng[2];              // random number state
     uint32_t root;                // root node index
@@ -211,7 +211,7 @@ struct mcts {
         uint32_t playouts[61];    // number of playouts for this play
         uint32_t next[61];        // next node when taking this play
         uint16_t refcount;        // number of nodes referencing this node
-        uint8_t  flags;
+        uint8_t  unexplored;      // count of unexplored
     } nodes[];
 };
 
@@ -253,13 +253,16 @@ mcts_alloc(struct mcts *m, const uint64_t state[2])
     n->state[1] = state[1];
     n->refcount = 1;
     n->total_playouts = 0;
-    n->flags = 0;
+    n->unexplored = 0;
     n->chain = *head;
     *head = nodei;
+    uint64_t taken = state[0] | state[1];
     for (int i = 0; i < 61; i++) {
         n->wins[i] = 0;
         n->playouts[i] = 0;
         n->next[i] = MCTS_NULL;
+        if (!((taken >> i) & 1))
+            n->unexplored++;
     }
     return nodei;
 }
@@ -267,7 +270,7 @@ mcts_alloc(struct mcts *m, const uint64_t state[2])
 static void
 mcts_free(struct mcts *m, uint32_t node)
 {
-    if (node != MCTS_NULL && node != MCTS_LEAF) {
+    if (node < MCTS_WIN1) {
         struct mcts_node *n = m->nodes + node;
         assert(n->refcount);
         if (--n->refcount == 0) {
@@ -322,39 +325,57 @@ mcts_advance(struct mcts *m, int tile)
     m->root = root->next[tile];
     root->next[tile] = MCTS_NULL;  // prevents free
     mcts_free(m, old_root);
-    if (m->root == MCTS_NULL || m->root == MCTS_LEAF) {
+    if (m->root >= MCTS_WIN1) {
         /* never explored this branch, allocate it */
         m->root = mcts_alloc(m, state);
     }
 }
 
 static int
-random_play(uint64_t *rng, uint64_t taken)
+random_play_from_remaining(struct mcts_node *n, uint64_t *rng)
 {
-    taken |= UINT64_C(7) << 61; // set high bits as "taken"
-    for (;;) {
-        uint64_t random = xoroshiro128plus(rng);
-        for (int i = 0; i < 10; i++) {
-            int candidate = (random >> (6 * i)) & 0x3f;
-            if (!((taken >> candidate) & 1))
-                return candidate;
-        }
-    }
+    uint64_t taken = n->state[0] | n->state[1];
+    int options[61];
+    int noptions = 0;
+    for (int i = 0; i < 61; i++)
+        if (!((taken >> i) & 1) && n->next[i] == MCTS_NULL)
+            options[noptions++] = i;
+    assert(noptions);
+    return options[xoroshiro128plus(rng) % noptions];
+}
+
+static int
+random_play_simple(uint64_t taken, uint64_t *rng)
+{
+    int options[61];
+    int noptions = 0;
+    for (int i = 0; i < 61; i++)
+        if (!((taken >> i) & 1))
+            options[noptions++] = i;
+    assert(noptions);
+    return options[xoroshiro128plus(rng) % noptions];
 }
 
 static int
 mcts_playout(struct mcts *m, uint32_t node, int turn)
 {
+    if (node == MCTS_WIN0)
+        return 0;
+    else if (node == MCTS_WIN1)
+        return 1;
+    assert(node != MCTS_NULL);
+
     struct mcts_node *n = m->nodes + node;
-    uint64_t copy[2] = {n->state[0], n->state[1]};
-    int play;
-    float best = -1.0f;
-    uint64_t taken = n->state[0] | n->state[1];
-    if (n->flags & MCTS_UCB1_FLAG) {
-        play = -1;
+    int play = -1;
+    if (!n->unexplored) {
+        /* Use upper confidence bound (UCB1). */
+        uint64_t taken = n->state[0] | n->state[1];
+        float best = -1.0f;
         float numerator = MCTS_C * logf(n->total_playouts);
+        // TODO: randomly break ties
         for (int i = 0; i < 61; i++) {
             if (!((taken >> i) & 1)) {
+                assert(n->playouts[i]);
                 float mean = n->wins[i] / (float)n->playouts[i];
                 float x = mean + sqrtf(numerator / n->playouts[i]);
                 if (x > best) {
@@ -363,80 +384,93 @@ mcts_playout(struct mcts *m, uint32_t node, int turn)
                 }
             }
         }
-    } else {
-        play = random_play(m->rng, taken);
-    }
-    assert(play >= 0 && play <= 61);
-    uint64_t play_bit = UINT64_C(1) << play;
-    copy[turn] |= play_bit;
-    uint64_t dummy;
-    switch (check(copy[turn], play, &dummy)) {
-        case CHECK_RESULT_WIN:
+        int winner = mcts_playout(m, n->next[play], !turn);
+        if (winner != -1) {
             n->playouts[play]++;
             n->total_playouts++;
+        }
+        if (winner == turn)
             n->wins[play]++;
-            n->next[play] = MCTS_LEAF;
-            return turn;
-        case CHECK_RESULT_LOSS:
-            n->playouts[play]++;
-            n->total_playouts++;
-            n->next[play] = MCTS_LEAF;
-            return !turn;
-        case CHECK_RESULT_NOTHING:
-            break;
-    }
-    if (n->next[play] == MCTS_NULL) {
-        n->next[play] = mcts_alloc(m, copy);
-        if (n->next[play] == MCTS_NULL)
-            return -1; // out of memory
-        int full = 1;
-        for (int i = 0; i < 61; i++) {
-            if (!((taken >> i) & 1) && n->next[i] == MCTS_NULL) {
-                full = 0;
+        return winner;
+    } else {
+        /* Choose a random unplayed move. */
+        play = random_play_from_remaining(n, m->rng);
+        assert(play >= 0 && play <= 61);
+        uint64_t next_state[2] = {n->state[0], n->state[1]};
+        next_state[turn] |= UINT64_C(1) << play;
+        uint64_t dummy;
+        switch (check(next_state[turn], play, &dummy)) {
+            case CHECK_RESULT_WIN:
+                n->playouts[play]++;
+                n->total_playouts++;
+                n->wins[play]++;
+                n->next[play] = turn ? MCTS_WIN1 : MCTS_WIN0;
+                n->unexplored--;
+                return turn;
+            case CHECK_RESULT_LOSS:
+                n->playouts[play]++;
+                n->total_playouts++;
+                n->next[play] = turn ? MCTS_WIN0 : MCTS_WIN1;
+                n->unexplored--;
+                return !turn;
+            case CHECK_RESULT_NOTHING:
+                n->next[play] = mcts_alloc(m, next_state);
+                if (n->next[play] == MCTS_NULL)
+                    return -1; // out of memory
+                n->unexplored--;
+                n->playouts[play]++;
+                n->total_playouts++;
                 break;
+        }
+        /* Simulate remaining without allocation. */
+        int parent_slot = play;
+        int parent_turn = turn;
+        for (;;) {
+            turn = !turn;
+            uint64_t taken = next_state[0] | next_state[1];
+            int play = random_play_simple(taken, m->rng);
+            next_state[turn] |= UINT64_C(1) << play;
+            uint64_t dummy;
+            switch (check(next_state[turn], play, &dummy)) {
+                case CHECK_RESULT_WIN:
+                    if (turn == parent_turn)
+                        n->wins[parent_slot]++;
+                    return turn;
+                case CHECK_RESULT_LOSS:
+                    if (turn != parent_turn)
+                        n->wins[parent_slot]++;
+                    return !turn;
+                case CHECK_RESULT_NOTHING:
+                    break;
             }
         }
-        if (full)
-            n->flags |= MCTS_UCB1_FLAG;
     }
-    int winner = mcts_playout(m, n->next[play], !turn);
-    if (winner != -1) {
-        n->playouts[play]++;
-        n->total_playouts++;
-    }
-    if (winner == turn)
-        n->wins[play]++;
-    return winner;
 }
 
 static int
 mcts_choose(struct mcts *m, uint64_t timeout_usec)
 {
     uint64_t stop = os_uepoch() + timeout_usec;
-    int oom_notice = 0;
+    int oom = 0;
     do {
-        int iterations = 64 * 1024;
-        int oom_count = 0;
-        for (int i = 0; i < iterations; i++) {
+        // TODO: dynamically adjust iterations
+        for (int i = 0; i < 64 * 1024; i++) {
             int r = mcts_playout(m, m->root, m->root_turn);
             if (r < 0) {
-                oom_count++;
+                oom = 1;
+                break;
             }
         }
-        if (oom_count == iterations) {
-            printf("note: no more progress made, bailing out\n");
-            break;
-        }
-        if (oom_count && !oom_notice) {
-            fprintf(stderr, "note: out of memory, examining old paths\n");
-            oom_notice = 1;
-        }
-    } while (os_uepoch() < stop);
+        printf("%.2f%% memory usage, %" PRIu32 "\n",
+               100 * m->nodes_allocated / (double)m->nodes_avail,
+               m->nodes[m->root].total_playouts);
+    } while (!oom && os_uepoch() < stop);
 
     int best = -1;
     float best_ratio = -1.0f;
     struct mcts_node *n = m->nodes + m->root;
     uint64_t available = n->state[0] | n->state[1];
+    // TODO: randomly break ties
     for (int i = 0; i < 61; i++) {
         if (!((available >> i) & 1) && n->playouts[i]) {
             float ratio = n->wins[i] / (float)n->playouts[i];
