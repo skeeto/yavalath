@@ -86,9 +86,9 @@ yavalath_check(uint64_t  who,
  *
  * The AI will make no other memory or resource allocations, and its
  * entire state will be stored in this buffer. This means the buffer
- * could be stored (say, to disk) and restarted from the same point in
- * the future. There is no need to deinitialize this buffer when
- * you're done.
+ * could be stored on disk (in an unportable format) and restarted
+ * from the same point in the future. There is no need to deinitialize
+ * this buffer when you're done.
  *
  * The bufsize must be at least several megabytes, typically several
  * gigabytes. Ideally it will be just large enough to avoid cutting
