@@ -6,6 +6,7 @@
 #include <inttypes.h>
 
 #define TIMEOUT_USEC (15 * 1000000UL)
+#define MAX_PLAYOUTS UINT32_C(-1)
 #define MEMORY_USAGE 0.8f
 #define MCTS_C       2.0f
 
@@ -503,29 +504,37 @@ mcts_choose(struct mcts *m, uint64_t timeout_usec)
 {
     uint64_t stop = os_uepoch() + timeout_usec;
     int oom = 0;
+    uint32_t playouts = 0;
     do {
-        uint64_t playout_start = os_uepoch();
-        for (uint32_t i = 0; i < m->step_iterations; i++) {
+        uint32_t iterations = m->step_iterations;
+        if (playouts + iterations > MAX_PLAYOUTS)
+            iterations = MAX_PLAYOUTS - playouts;
+        uint64_t time_start = os_uepoch();
+        for (uint32_t i = 0; i < iterations; i++) {
             int r = mcts_playout(m, m->root, m->root_turn);
             if (r < 0) {
                 oom = 1;
                 break;
             }
         }
-        uint64_t playout_end = os_uepoch();
-        uint64_t playout_time = playout_end - playout_start;
-        if (playout_time > 300000)
-            m->step_iterations *= 0.85f;
-        else if (playout_time < 250000)
-            m->step_iterations *= 1.18f;
+        uint64_t time_end = os_uepoch();
+        playouts += iterations;
+
+        if (iterations == m->step_iterations) {
+            uint64_t run_time = time_end - time_start;
+            if (run_time > 300000)
+                m->step_iterations *= 0.85f;
+            else if (run_time < 250000)
+                m->step_iterations *= 1.18f;
+        }
 
         os_restart_line();
         printf("%.2f%% memory usage, %" PRIu32 " playouts, %0.1fs remaining",
                100 * m->nodes_allocated / (double)m->nodes_avail,
                m->nodes[m->root].total_playouts,
-               stop / 1e6 - playout_end / 1e6);
+               stop / 1e6 - time_end / 1e6);
         fflush(stdout);
-    } while (!oom && os_uepoch() < stop);
+    } while (!oom && os_uepoch() < stop && playouts < MAX_PLAYOUTS);
     puts(" ... done\n");
 
     double best_ratio = -1.0;
