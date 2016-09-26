@@ -64,7 +64,7 @@ main(void)
 
     /* Write out bitmask tables. */
     printf("#include <stdint.h>\n\n");
-    printf("static const int8_t store_map[61][9] = {\n");
+    printf("static const int8_t store_map[9][9] = {\n");
     for (unsigned i = 0; i < 9; i++) {
         printf("    {");
         for (unsigned j = 0; j < 9; j++)
