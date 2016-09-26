@@ -5,7 +5,7 @@
 #include "yavalath.h"
 
 #define TIMEOUT_MSEC (15 * 1000UL)
-#define MAX_PLAYOUTS UINT32_C(-1)
+#define MAX_PLAYOUTS UINT32_C(25000000)
 #define MEMORY_USAGE 0.8f
 
 #ifdef __unix__
