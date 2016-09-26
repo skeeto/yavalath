@@ -176,11 +176,14 @@ static void
 print_usage(void)
 {
     printf("yavalath-cli [options]\n");
-    printf("  -0<h|c>       Select human or computer for player 0\n");
-    printf("  -1<h|c>       Select human or computer for player 1\n");
-    printf("  -t<secs>      Set AI timeout in (fractional) seconds\n");
-    printf("  -p<playouts>  Set maximum number of playouts for AI\n");
-    printf("  -m<0.0-1.0>   Fraction of physical memory to use for AI\n");
+    printf("  -0<h|c>       Select human or computer for player 0 (h)\n");
+    printf("  -1<h|c>       Select human or computer for player 1 (c)\n");
+    printf("  -t<seconds>   Set AI timeout in fractional seconds (%0.1f)\n",
+           TIMEOUT_MSEC / 1e3);
+    printf("  -p<playouts>  Set maximum number of playouts for AI (%"
+           PRIu32 ")\n", MAX_PLAYOUTS);
+    printf("  -m<0.0-1.0>   Fraction of physical memory to use for AI "
+           "(%0.1f)\n", MEMORY_USAGE);
     printf("  -h            Print this help text\n\n");
 
     printf("For example, to see AI vs. AI with 1 minute turns:\n");
