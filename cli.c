@@ -258,17 +258,19 @@ main(int argc, char **argv)
 
     size_t physical_memory = os_physical_memory();
     size_t size = physical_memory * memory_usage;
-    void *buf;
-    do {
-        size *= 0.8;
-        buf = malloc(size);
-    } while (!buf);
-    yavalath_ai_init(buf, size, 0, 0, seed);
-    printf("%zu MB physical memory found, "
-           "AI will use %zu MB (%" PRIu32 " nodes)\n",
-           physical_memory / 1024 / 1024,
-           size / 1024 / 1024,
-           yavalath_ai_nodes_total(buf));
+    void *buf = NULL;
+    if (player_type[0] == PLAYER_AI || player_type[1] == PLAYER_AI) {
+        do {
+            size *= 0.8;
+            buf = malloc(size);
+        } while (!buf);
+        yavalath_ai_init(buf, size, 0, 0, seed);
+        printf("%zu MB physical memory found, "
+               "AI will use %zu MB (%" PRIu32 " nodes)\n",
+               physical_memory / 1024 / 1024,
+               size / 1024 / 1024,
+               yavalath_ai_nodes_total(buf));
+    }
 
     uint64_t last_play = 0;
     for (;;) {
@@ -301,7 +303,8 @@ main(int argc, char **argv)
                 break;
         }
         last_play = UINT64_C(1) << bit;
-        yavalath_ai_advance(buf, bit);
+        if (buf)
+            yavalath_ai_advance(buf, bit);
         board[turn] |= UINT64_C(1) << bit;
         uint64_t where;
         enum yavalath_game_result result;
