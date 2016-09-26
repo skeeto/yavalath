@@ -172,12 +172,28 @@ playout_to_limit(void *buf, struct playout_limits *limits)
     puts(" ... done\n");
 }
 
+static void
+print_usage(void)
+{
+    printf("yavalath-cli [options]\n");
+    printf("  -0<h|c>       Select human or computer for player 0\n");
+    printf("  -1<h|c>       Select human or computer for player 1\n");
+    printf("  -t<secs>      Set AI timeout in (fractional) seconds\n");
+    printf("  -p<playouts>  Set maximum number of playouts for AI\n");
+    printf("  -m<0.0-1.0>   Fraction of physical memory to use for AI\n");
+    printf("  -h            Print this help text\n\n");
+
+    printf("For example, to see AI vs. AI with 1 minute turns:\n");
+    printf("  $ yavalath-cli -0c -1c -t60\n");
+}
+
 int
-main(void)
+main(int argc, char **argv)
 {
     uint64_t seed = os_uepoch();
     uint64_t board[2] = {0, 0};
     unsigned turn = 0;
+    float memory_usage = MEMORY_USAGE;
     enum player_type {
         PLAYER_HUMAN,
         PLAYER_AI
@@ -189,11 +205,62 @@ main(void)
         .playouts = MAX_PLAYOUTS,
     };
 
+    /* Mini getopt() */
+    for (int i = 1; i < argc; i++) {
+        if (argv[i][0] == '-') {
+            char *p = argv[i] + 1;
+            switch (*p) {
+                case '0':
+                case '1':
+                    if (!p[1])
+                        goto missing;
+                    switch (p[1]) {
+                        case 'h':
+                            player_type[*p - '0'] = PLAYER_HUMAN;
+                            break;
+                        case 'c':
+                            player_type[*p - '0'] = PLAYER_AI;
+                            break;
+                        default:
+                            goto fail;
+                    }
+                    break;
+                case 't':
+                    if (!p[1])
+                        goto missing;
+                    limits.msecs = strtod(p + 1, 0) * 1000;
+                    break;
+                case 'p':
+                    if (!p[1])
+                        goto missing;
+                    limits.playouts = strtoll(p + 1, 0, 10);
+                    break;
+                case 'm':
+                    if (!p[1])
+                        goto missing;
+                    memory_usage = strtof(p + 1, 0);
+                    break;
+                case 'h':
+                    print_usage();
+                    exit(0);
+            }
+        } else {
+            goto fail;
+        }
+        continue;
+  missing:
+        fprintf(stderr, "yavalath-cli: missing argument, %s\n", argv[i]);
+        exit(-1);
+  fail:
+        fprintf(stderr, "yavalath-cli: bad argument, %s\n", argv[i]);
+        exit(-1);
+    }
+
     size_t physical_memory = os_physical_memory();
-    size_t size = physical_memory;
+    size_t size = physical_memory * memory_usage;
     void *buf;
     do {
-        size *= MEMORY_USAGE;
+        size *= 0.8;
         buf = malloc(size);
     } while (!buf);
     yavalath_ai_init(buf, size, 0, 0, seed);
