@@ -1,111 +1,11 @@
 #include <math.h>
-#include <stdio.h>
 #include <assert.h>
+#include <stdint.h>
 #include <stdlib.h>
-#include <string.h>
-#include <inttypes.h>
-
-#define TIMEOUT_USEC (15 * 1000000UL)
-#define MAX_PLAYOUTS UINT32_C(-1)
-#define MEMORY_USAGE 0.8f
-#define MCTS_C       2.0f
-
-#ifdef __unix__
-#include <sys/time.h>
-#include <unistd.h>
-
-static uint64_t
-os_uepoch(void)
-{
-    struct timeval tv;
-    gettimeofday(&tv, 0);
-    return UINT64_C(1000000) * tv.tv_sec + tv.tv_usec;
-}
-
-static size_t
-os_physical_memory(void)
-{
-    size_t pages = sysconf(_SC_PHYS_PAGES);
-    size_t page_size = sysconf(_SC_PAGE_SIZE);
-    return pages * page_size;
-}
-
-static void
-os_color(int color)
-{
-    if (color)
-        printf("\x1b[%d;1m", 90 + color);
-    else
-        fputs("\x1b[0m", stdout);
-}
-
-static void
-os_restart_line(void)
-{
-    puts("\x1b[F");
-}
-
-static void
-os_finish(void)
-{
-    // nothing
-}
-
-#elif _WIN32
-#include <windows.h>
-
-static uint64_t
-os_uepoch(void)
-{
-    FILETIME ft;
-    GetSystemTimeAsFileTime(&ft);
-    uint64_t tt = ft.dwHighDateTime;
-    tt <<= 32;
-    tt |= ft.dwLowDateTime;
-    tt /=10;
-    tt -= UINT64_C(11644473600000000);
-    return tt;
-}
-
-static size_t
-os_physical_memory(void)
-{
-    MEMORYSTATUSEX status = {.dwLength = sizeof(status)};
-    GlobalMemoryStatusEx(&status);
-    return status.ullTotalPhys;
-}
-
-static void
-os_color(int color)
-{
-    WORD bits = color ? FOREGROUND_INTENSITY : 0;
-    if (!color || color & 0x1)
-        bits |= FOREGROUND_RED;
-    if (!color || color & 0x2)
-        bits |= FOREGROUND_GREEN;
-    if (!color || color & 0x4)
-        bits |= FOREGROUND_BLUE;
-    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), bits);
-}
-
-static void
-os_restart_line(void)
-{
-    HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
-    CONSOLE_SCREEN_BUFFER_INFO info;
-    GetConsoleScreenBufferInfo(out, &info);
-    info.dwCursorPosition.X = 0;
-    SetConsoleCursorPosition(out, info.dwCursorPosition);
-}
-
-static void
-os_finish(void)
-{
-    getchar(); // leave window open
-}
-#endif
-
+#include "yavalath.h"
 #include "tables.h"
+
+#define MCTS_C       2.0f
 
 static int
 hex_to_bit(int q, int r)
@@ -143,36 +43,6 @@ splitmix64(uint64_t *x)
     return z ^ (z >> 31);
 }
 
-static void
-display(uint64_t w, uint64_t b, uint64_t highlight, int color)
-{
-    for (int q = -4; q <= 4; q++) {
-        printf("%c ", 'a' + q + 4);
-        for (int s = 0; s < q + 4; s++)
-            putchar(' ');
-        for (int r = -4; r <= 4; r++) {
-            int bit = hex_to_bit(q, r);
-            if (bit == -1)
-                fputs("  ", stdout);
-            else {
-                int h = highlight >> bit & 1;
-                if (h)
-                    os_color(color);
-                if ((w >> bit) & 1)
-                    putchar('o');
-                else if ((b >> bit) & 1)
-                    putchar('x');
-                else
-                    putchar('.');
-                if (h)
-                    os_color(0);
-                putchar(' ');
-            }
-        }
-        putchar('\n');
-    }
-}
-
 static int
 notation_to_hex(const char *s, int *q, int *r)
 {
@@ -185,34 +55,27 @@ notation_to_hex(const char *s, int *q, int *r)
     return 1;
 }
 
-enum check_result {
-    CHECK_RESULT_NOTHING,
-    CHECK_RESULT_WIN,
-    CHECK_RESULT_LOSS,
-    CHECK_RESULT_DRAW,
-};
-
-static enum check_result
+static enum yavalath_game_result
 check(uint64_t who, uint64_t opponent, int where, uint64_t *how)
 {
     for (int i = 0; i < 12; i++) {
         uint64_t mask = pattern_win[where][i];
         if (mask && (who & mask) == mask) {
             *how = mask;
-            return CHECK_RESULT_WIN;
+            return YAVALATH_GAME_WIN;
         }
     }
     for (int i = 0; i < 9; i++) {
         uint64_t mask = pattern_lose[where][i];
         if (mask && (who & mask) == mask) {
             *how = mask;
-            return CHECK_RESULT_LOSS;
+            return YAVALATH_GAME_LOSS;
         }
     }
     *how = 0;
     if ((who | opponent) == UINT64_C(0x1fffffffffffffff))
-        return CHECK_RESULT_DRAW;
-    return CHECK_RESULT_NOTHING;
+        return YAVALATH_GAME_DRAW;
+    return YAVALATH_GAME_UNRESOLVED;
 }
 
 static uint64_t
@@ -235,7 +98,6 @@ struct mcts {
     uint32_t nodes_avail;         // total nodes available
     uint32_t nodes_allocated;     // total number allocated
     int root_turn;                // whose turn it is at root node
-    uint32_t step_iterations;     // playouts to make between time checks
     struct mcts_node {
         uint32_t head;            // head of hash list for this slot
         uint32_t chain;           // next item in hash table list
@@ -327,15 +189,17 @@ mcts_free(struct mcts *m, uint32_t node)
 }
 
 static struct mcts *
-mcts_init(void *buf, size_t bufsize, uint64_t state[2], int turn)
+mcts_init(void *buf,
+          size_t bufsize,
+          uint64_t state[2],
+          int turn,
+          uint64_t seed)
 {
     struct mcts *m = buf;
     m->nodes_avail = (bufsize  - sizeof(*m)) / sizeof(m->nodes[0]);
     m->nodes_allocated = 0;
-    uint64_t seed = os_uepoch();
     m->rng[0] = splitmix64(&seed);
     m->rng[1] = splitmix64(&seed);
-    m->step_iterations = 64 * 1024;
     m->free = 0;
     for (uint32_t i = 0; i < m->nodes_avail; i++) {
         m->nodes[i].head = MCTS_NULL;
@@ -347,13 +211,13 @@ mcts_init(void *buf, size_t bufsize, uint64_t state[2], int turn)
     return m->root == MCTS_NULL ? NULL : m;
 }
 
-static void
+static int
 mcts_advance(struct mcts *m, int tile)
 {
     uint32_t old_root = m->root;
     struct mcts_node *root = m->nodes + old_root;
     if (((root->state[0] | root->state[1]) >> tile) & 1)
-        fprintf(stderr, "error: invalid move, %d\n", tile);
+        return 0;
     uint64_t state[2] = {root->state[0], root->state[1]};
     state[m->root_turn] |= UINT64_C(1) << tile;
     m->root_turn = !m->root_turn;
@@ -364,6 +228,7 @@ mcts_advance(struct mcts *m, int tile)
         /* never explored this branch, allocate it */
         m->root = mcts_alloc(m, state);
     }
+    return 1;
 }
 
 static int
@@ -444,26 +309,26 @@ mcts_playout(struct mcts *m, uint32_t node, int turn)
         next_state[turn] |= UINT64_C(1) << play;
         uint64_t dummy;
         switch (check(next_state[turn], next_state[!turn], play, &dummy)) {
-            case CHECK_RESULT_WIN:
+            case YAVALATH_GAME_WIN:
                 n->playouts[play]++;
                 n->total_playouts++;
                 n->wins[play]++;
                 n->next[play] = turn ? MCTS_WIN1 : MCTS_WIN0;
                 n->unexplored--;
                 return turn;
-            case CHECK_RESULT_LOSS:
+            case YAVALATH_GAME_LOSS:
                 n->playouts[play]++;
                 n->total_playouts++;
                 n->next[play] = turn ? MCTS_WIN0 : MCTS_WIN1;
                 n->unexplored--;
                 return !turn;
-            case CHECK_RESULT_DRAW:
+            case YAVALATH_GAME_DRAW:
                 n->playouts[play]++;
                 n->total_playouts++;
                 n->next[play] = MCTS_DRAW;
                 n->unexplored--;
                 return 100; // neither
-            case CHECK_RESULT_NOTHING:
+            case YAVALATH_GAME_UNRESOLVED:
                 n->next[play] = mcts_alloc(m, next_state);
                 if (n->next[play] == MCTS_NULL)
                     return -1; // out of memory
@@ -482,68 +347,124 @@ mcts_playout(struct mcts *m, uint32_t node, int turn)
             next_state[turn] |= UINT64_C(1) << play;
             uint64_t dummy;
             switch (check(next_state[turn], next_state[!turn], play, &dummy)) {
-                case CHECK_RESULT_WIN:
+                case YAVALATH_GAME_WIN:
                     if (turn == parent_turn)
                         n->wins[parent_slot]++;
                     return turn;
-                case CHECK_RESULT_LOSS:
+                case YAVALATH_GAME_LOSS:
                     if (turn != parent_turn)
                         n->wins[parent_slot]++;
                     return !turn;
-                case CHECK_RESULT_DRAW:
+                case YAVALATH_GAME_DRAW:
                     return 100;
-                case CHECK_RESULT_NOTHING:
+                case YAVALATH_GAME_UNRESOLVED:
                     break;
             }
         }
     }
 }
 
-static int
-mcts_choose(struct mcts *m, uint64_t timeout_usec)
+/* API */
+
+int
+yavalath_hex_to_bit(int q, int r)
 {
-    uint64_t stop = os_uepoch() + timeout_usec;
-    int oom = 0;
-    uint32_t playouts = 0;
-    do {
-        uint32_t iterations = m->step_iterations;
-        if (playouts + iterations > MAX_PLAYOUTS)
-            iterations = MAX_PLAYOUTS - playouts;
-        uint64_t time_start = os_uepoch();
-        for (uint32_t i = 0; i < iterations; i++) {
-            int r = mcts_playout(m, m->root, m->root_turn);
-            if (r < 0) {
-                oom = 1;
-                break;
-            }
-        }
-        uint64_t time_end = os_uepoch();
-        playouts += iterations;
+    return hex_to_bit(q, r);
+}
 
-        if (iterations == m->step_iterations) {
-            uint64_t run_time = time_end - time_start;
-            if (run_time > 300000)
-                m->step_iterations *= 0.85f;
-            else if (run_time < 250000)
-                m->step_iterations *= 1.18f;
-        }
+void
+yavalath_bit_to_hex(int bit, int *q, int *r)
+{
+    // TODO:
+    (void)bit;
+    (void)q;
+    (void)r;
+    abort();
+}
 
-        os_restart_line();
-        printf("%.2f%% memory usage, %" PRIu32 " playouts, %0.1fs remaining",
-               100 * m->nodes_allocated / (double)m->nodes_avail,
-               m->nodes[m->root].total_playouts,
-               stop / 1e6 - time_end / 1e6);
-        fflush(stdout);
-    } while (!oom && os_uepoch() < stop && playouts < MAX_PLAYOUTS);
-    puts(" ... done\n");
+int
+yavalath_notation_to_bit(const char *notation)
+{
+    int q, r;
+    if (notation_to_hex(notation, &q, &r))
+        return hex_to_bit(q, r);
+    return -1;
+}
 
-    double best_ratio = -1.0;
+void
+yavalath_bit_to_notation(char *notation, int bit)
+{
+    // TODO:
+    (void)notation;
+    (void)bit;
+    abort();
+}
+
+enum yavalath_game_result
+yavalath_check(uint64_t  who,
+               uint64_t  opponent,
+               int       bit,
+               uint64_t *where)
+{
+    uint64_t dummy;
+    if (!where)
+        where = &dummy;
+    return check(who, opponent, bit, where);
+}
+
+enum yavalath_result
+yavalath_ai_init(void    *buf,
+                 size_t   bufsize,
+                 uint64_t player0,
+                 uint64_t player1,
+                 uint64_t seed)
+{
+
+    uint64_t state[2] = {player0, player1};
+    if (player0 & player1)
+        return YAVALATH_INVALID_ARGUMENT;
+    if (player0 & UINT64_C(0xe000000000000000))
+        return YAVALATH_INVALID_ARGUMENT;
+    if (player1 & UINT64_C(0xe000000000000000))
+        return YAVALATH_INVALID_ARGUMENT;
+    if (mcts_init(buf, bufsize, state, 0, seed))
+        return YAVALATH_SUCCESS;
+    return YAVALATH_INVALID_ARGUMENT;
+}
+
+enum yavalath_result
+yavalath_ai_advance(void *buf, int bit)
+{
+    if (mcts_advance(buf, bit))
+        return YAVALATH_SUCCESS;
+    return YAVALATH_INVALID_ARGUMENT;
+}
+
+enum yavalath_result
+yavalath_ai_playout(void *buf, uint32_t num_playouts)
+{
+    struct mcts *m = buf;
+    for (uint32_t i = 0; i < num_playouts; i++) {
+        int r = mcts_playout(m, m->root, m->root_turn);
+        if (r == -1)
+            return YAVALATH_BAILOUT_MEMORY;
+        else if (r == -2)
+            return YAVALATH_BAILOUT_OVERFLOW;
+    }
+    return YAVALATH_SUCCESS;
+}
+
+int
+yavalath_ai_best_move(void *buf)
+{
+    struct mcts *m = buf;
     struct mcts_node *n = m->nodes + m->root;
-    uint64_t available = n->state[0] | n->state[1];
+    uint64_t taken = n->state[0] | n->state[1];
+    double best_ratio = -1.0;
     int best[61];
     int nbest = 0;
     for (int i = 0; i < 61; i++) {
-        if (!((available >> i) & 1) && n->playouts[i]) {
+        if (!((taken >> i) & 1) && n->playouts[i]) {
             double ratio = n->wins[i] / (double)n->playouts[i];
             if (ratio > best_ratio) {
                 nbest = 1;
@@ -557,92 +478,34 @@ mcts_choose(struct mcts *m, uint64_t timeout_usec)
     return nbest == 1 ? best[0] : best[xoroshiro128plus(m->rng) % nbest];
 }
 
-int
-main(void)
+double
+yavalath_ai_move_score(const void *buf, int bit)
 {
-    uint64_t board[2] = {0, 0};
-    unsigned turn = 0;
-    enum player_type {
-        PLAYER_HUMAN,
-        PLAYER_AI
-    } player_type[2] = {
-        PLAYER_HUMAN, PLAYER_AI
-    };
-
-    size_t physical_memory = os_physical_memory();
-    size_t size = physical_memory;
-    void *buf;
-    do {
-        size *= MEMORY_USAGE;
-        buf = malloc(size);
-    } while (!buf);
-    struct mcts *mcts = mcts_init(buf, size, board, turn);
-    printf("%zu MB physical memory found, "
-           "AI will use %zu MB (%" PRIu32 " nodes)\n",
-           physical_memory / 1024 / 1024,
-           size / 1024 / 1024,
-           mcts->nodes_avail);
-
-    uint64_t last_play = 0;
-    for (;;) {
-        display(board[0], board[1], last_play, 3);
-        fflush(stdout);
-        char line[64];
-        int bit = -1;
-        switch (player_type[turn]) {
-            case PLAYER_HUMAN:
-                for (;;) {
-                    fputs("\n> ", stdout);
-                    fflush(stdout);
-                    if (!fgets(line, sizeof(line), stdin))
-                        return -1; // EOF
-                    int q, r;
-                    if (notation_to_hex(line, &q, &r)) {
-                        bit = hex_to_bit(q, r);
-                        if (bit == -1) {
-                            printf("Invalid move (out of bounds)\n");
-                        } else if (((board[0] >> bit) & 1) ||
-                                   ((board[1] >> bit) & 1)) {
-                            printf("Invalid move (tile not free)\n");
-                        } else {
-                            break;
-                        }
-                    }
-                }
-                break;
-            case PLAYER_AI:
-                putchar('\n');
-                bit = mcts_choose(mcts, TIMEOUT_USEC);
-                break;
-        }
-        last_play = UINT64_C(1) << bit;
-        mcts_advance(mcts, bit);
-        uint64_t where;
-        board[turn] |= UINT64_C(1) << bit;
-        switch (check(board[turn], board[!turn], bit, &where)) {
-            case CHECK_RESULT_NOTHING: {
-                turn = !turn;
-            } break;
-            case CHECK_RESULT_LOSS: {
-                display(board[0], board[1], where, 1);
-                printf("player %c loses!\n", "ox"[turn]);
-                goto done;
-            } break;
-            case CHECK_RESULT_WIN: {
-                display(board[0], board[1], where, 4);
-                printf("player %c wins!\n", "ox"[turn]);
-                goto done;
-            } break;
-            case CHECK_RESULT_DRAW: {
-                display(board[0], board[1], where, 5);
-                printf("draw game!\n");
-                goto done;
-            } break;
-        }
-    }
-
-done:
-    free(mcts);
-    os_finish();
+    const struct mcts *m = buf;
+    const struct mcts_node *n = m->nodes + m->root;
+    uint64_t taken = n->state[0] | n->state[1];
+    if (!((taken >> bit) & 1) && n->playouts[bit])
+        return n->wins[bit] / (double)n->playouts[bit];
     return 0;
+}
+
+uint32_t
+yavalath_ai_nodes_total(const void *buf)
+{
+    const struct mcts *m = buf;
+    return m->nodes_avail;
+}
+
+uint32_t
+yavalath_ai_nodes_used(const void *buf)
+{
+    const struct mcts *m = buf;
+    return m->nodes_allocated;
+}
+
+uint32_t
+yavalath_ai_total_playouts(const void *buf)
+{
+    const struct mcts *m = buf;
+    return m->nodes[m->root].total_playouts;
 }

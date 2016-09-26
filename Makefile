@@ -1,16 +1,16 @@
-HOST_CC     = $(CC)
-CFLAGS      = -std=c99 -Wall -Wextra -Ofast -g3
-HOST_CFLAGS = $(CFLAGS)
-HOST_LDLIBS = -lm
+CFLAGS = -std=c99 -Wall -Wextra -Ofast -g3
+LDLIBS = -lm
 
-yavalath : yavalath.c tables.h
-	$(HOST_CC) $(HOST_CFLAGS) $(HOST_LDFLAGS) -o $@ $< $(HOST_LDLIBS)
+CLI_SOURCES = cli.c yavalath.c
+
+yavalath-cli : $(CLI_SOURCES) tables.h
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(CLI_SOURCES) $(LDLIBS)
 
 tables.h : tablegen
 	./tablegen > tables.h
 
 tablegen : tablegen.c
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LDLIBS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
 
 yavalath_all.c : yavalath.c tables.h
 	sed 's/^#include "tables.h"//' $< | cat tables.h - > $@
@@ -18,4 +18,4 @@ yavalath_all.c : yavalath.c tables.h
 amalgamation : yavalath_all.c
 
 clean :
-	$(RM) yavalath tablegen tables.h yavalath_all.c
+	$(RM) yavalath-cli tablegen tables.h yavalath_all.c
