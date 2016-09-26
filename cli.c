@@ -264,7 +264,7 @@ main(int argc, char **argv)
     void *buf = NULL;
     if (player_type[0] == PLAYER_AI || player_type[1] == PLAYER_AI) {
         do {
-            size *= 0.8;
+            size *= 0.95;
             buf = malloc(size);
         } while (!buf);
         yavalath_ai_init(buf, size, 0, 0, seed);
