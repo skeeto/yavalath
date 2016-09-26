@@ -1,7 +1,7 @@
 CFLAGS = -std=c99 -Wall -Wextra -Ofast -g3
 LDLIBS = -lm
 
-CLI_SOURCES = cli.c yavalath.c
+CLI_SOURCES = cli.c yavalath_ai.c
 
 yavalath-cli : $(CLI_SOURCES) tables.h
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(CLI_SOURCES) $(LDLIBS)
@@ -12,10 +12,10 @@ tables.h : tablegen
 tablegen : tablegen.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
 
-yavalath_all.c : yavalath.c tables.h
+yavalath.c : yavalath_ai.c tables.h
 	sed 's/^#include "tables.h"//' $< | cat tables.h - > $@
 
-amalgamation : yavalath_all.c
+amalgamation : yavalath.c
 
 clean :
-	$(RM) yavalath-cli tablegen tables.h yavalath_all.c
+	$(RM) yavalath-cli tablegen tables.h yavalath.c
