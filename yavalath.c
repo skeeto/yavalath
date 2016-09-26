@@ -5,7 +5,7 @@
 #include <string.h>
 #include <inttypes.h>
 
-#define TIMEOUT_USEC (10 * 1000000UL)
+#define TIMEOUT_USEC (15 * 1000000UL)
 #define MEMORY_USAGE 0.8f
 #define MCTS_C       2.0f
 
