@@ -166,13 +166,13 @@ yavalath_ai_best_move(void *buf);
  * The score is always within [0.0 - 1.0].
  */
 double
-yavalath_ai_move_score(const void *buf, int bit);
+yavalath_ai_get_move_score(const void *buf, int bit);
 
 /**
  * Return the total number of nodes available to the AI.
  */
 uint32_t
-yavalath_ai_nodes_total(const void *buf);
+yavalath_ai_get_nodes_total(const void *buf);
 
 /**
  * Return the number of nodes currently in use by the AI.
@@ -181,10 +181,10 @@ yavalath_ai_nodes_total(const void *buf);
  * approximation to the percentage of the AI buffer in use.
  */
 uint32_t
-yavalath_ai_nodes_used(const void *buf);
+yavalath_ai_get_nodes_used(const void *buf);
 
 /**
  * Return the total number of playouts through the current root.
  */
 uint32_t
-yavalath_ai_total_playouts(const void *buf);
+yavalath_ai_get_total_playouts(const void *buf);

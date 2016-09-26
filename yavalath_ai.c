@@ -498,7 +498,7 @@ yavalath_ai_best_move(void *buf)
 }
 
 double
-yavalath_ai_move_score(const void *buf, int bit)
+yavalath_ai_get_move_score(const void *buf, int bit)
 {
     const struct mcts *m = buf;
     const struct mcts_node *n = m->nodes + m->root;
@@ -509,21 +509,21 @@ yavalath_ai_move_score(const void *buf, int bit)
 }
 
 uint32_t
-yavalath_ai_nodes_total(const void *buf)
+yavalath_ai_get_nodes_total(const void *buf)
 {
     const struct mcts *m = buf;
     return m->nodes_avail;
 }
 
 uint32_t
-yavalath_ai_nodes_used(const void *buf)
+yavalath_ai_get_nodes_used(const void *buf)
 {
     const struct mcts *m = buf;
     return m->nodes_allocated;
 }
 
 uint32_t
-yavalath_ai_total_playouts(const void *buf)
+yavalath_ai_get_total_playouts(const void *buf)
 {
     const struct mcts *m = buf;
     return m->nodes[m->root].total_playouts;

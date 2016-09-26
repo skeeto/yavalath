@@ -159,11 +159,11 @@ playout_to_limit(void *buf, struct playout_limits *limits)
         else if (run_time < 250000)
             iterations *= 1.18f;
         os_restart_line();
-        uint32_t nodes_used = yavalath_ai_nodes_used(buf);
-        uint32_t nodes_total = yavalath_ai_nodes_total(buf);
+        uint32_t nodes_used = yavalath_ai_get_nodes_used(buf);
+        uint32_t nodes_total = yavalath_ai_get_nodes_total(buf);
         printf("%.2f%% memory usage, %" PRIu32 " playouts, %0.1fs remaining",
                100 * nodes_used / (double)nodes_total,
-               yavalath_ai_total_playouts(buf),
+               yavalath_ai_get_total_playouts(buf),
                timeout / 1e6 - time_end / 1e6);
         fflush(stdout);
     } while (r == YAVALATH_SUCCESS &&
@@ -272,7 +272,7 @@ main(int argc, char **argv)
                "AI will use %zu MB (%" PRIu32 " nodes)\n",
                physical_memory / 1024 / 1024,
                size / 1024 / 1024,
-               yavalath_ai_nodes_total(buf));
+               yavalath_ai_get_nodes_total(buf));
     }
 
     uint64_t last_play = 0;
