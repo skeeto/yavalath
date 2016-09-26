@@ -1,7 +1,7 @@
 #include <math.h>
 #include <assert.h>
+#include <stddef.h>
 #include <stdint.h>
-#include <stdlib.h>
 #include "yavalath.h"
 #include "tables.h"
 
@@ -14,6 +14,19 @@ hex_to_bit(int q, int r)
         return -1;
     else
         return store_map[q + 4][r + 4];
+}
+static int
+bit_to_hex(int bit, int *q, int *r)
+{
+    // TODO: closed form
+    for (int i = 0; i < 9; i++)
+        for (int j = 0; j < 9; j++)
+            if (store_map[i][j] == bit) {
+                *q = i - 4;
+                *r = j - 4;
+                return 1;
+            }
+    return 0;
 }
 
 static uint64_t
@@ -52,6 +65,17 @@ notation_to_hex(const char *s, int *q, int *r)
         return 0;
     *q = s[0] - 'a' - 4;
     *r = s[1] - "123455555"[*q + 4];
+    return 1;
+}
+
+static int
+hex_to_notation(char *s, int q, int r)
+{
+    if (q < -4 || q > 4 || r < -4 || r > 4)
+        return 0;
+    s[0] = q + 'a' + 4;
+    s[1] = r + "123455555"[q + 4];
+    s[2] = 0;
     return 1;
 }
 
@@ -375,11 +399,7 @@ yavalath_hex_to_bit(int q, int r)
 void
 yavalath_bit_to_hex(int bit, int *q, int *r)
 {
-    // TODO:
-    (void)bit;
-    (void)q;
-    (void)r;
-    abort();
+    bit_to_hex(bit, q, r);
 }
 
 int
@@ -394,10 +414,10 @@ yavalath_notation_to_bit(const char *notation)
 void
 yavalath_bit_to_notation(char *notation, int bit)
 {
-    // TODO:
-    (void)notation;
-    (void)bit;
-    abort();
+    int q = 0;
+    int r = 0;
+    bit_to_hex(bit, &q, &r);
+    hex_to_notation(notation, q, r);
 }
 
 enum yavalath_game_result
@@ -419,7 +439,6 @@ yavalath_ai_init(void    *buf,
                  uint64_t player1,
                  uint64_t seed)
 {
-
     uint64_t state[2] = {player0, player1};
     if (player0 & player1)
         return YAVALATH_INVALID_ARGUMENT;
