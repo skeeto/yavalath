@@ -8,10 +8,16 @@ represented using a pair of 64-bit bitboards, one for each player. The
 rules are encoded as two bit mask tables, and detecting wins and
 losses is just a handful of bit operations.
 
-Currently the interface is *very* crude and minimal since the focus is
-on creating an AI player. The input must be in [Susan notation][sus].
-For example, the upper-left tile is `a1` and the bottom-right tile is
-`i5`.
+The AI has an API, documented in `yavalath.h`, and can be plugged into
+a variety of interfaces. For embedding, consider using the
+amalgamation build (`make amalgamation`), which will reduce the AI
+sources to one source file (`yavalath.c`) and won't require an
+intermediate build program.
+
+For a user interface, only a minimal, crude CLI is available since the
+focus is on creating an AI player. The input must be in [Susan
+notation][sus]. For example, the upper-left tile is `a1` and the
+bottom-right tile is `i5`.
 
            1 2 3 4 5
         a . . . . . 6
@@ -25,9 +31,10 @@ For example, the upper-left tile is `a1` and the bottom-right tile is
         i . . . . . 6
            1 2 3 4 5
 
-The AI is a [UCT Monte Carlo tree search][mcts] and it's quite strong,
-especially if given plenty of memory and time. However, it likes to
-play against the edge more than makes sense, and I don't know why.
+The AI is a [UCT Monte Carlo tree search][mcts] and it's fairly
+strong, especially if given plenty of memory and time. However, it
+currently likes to play against the edge more than makes sense, and I
+don't know why.
 
 
 [yl]: http://www.cameronius.com/games/yavalath/
