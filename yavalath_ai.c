@@ -9,6 +9,8 @@
 #  define YAVALATH_C  0.5f
 #endif
 
+#define DRAW  100
+
 static int
 hex_to_bit(int q, int r)
 {
@@ -298,7 +300,7 @@ mcts_playout_final(uint64_t *rng, uint64_t *state, int initial_turn)
             case YAVALATH_GAME_LOSS:
                 return !turn;
             case YAVALATH_GAME_DRAW:
-                return 100;
+                return DRAW;
             case YAVALATH_GAME_UNRESOLVED:
                 break;
         }
@@ -313,7 +315,7 @@ mcts_playout(struct mcts *m, uint32_t node, int turn)
     else if (node == MCTS_WIN1)
         return 1;
     else if (node == MCTS_DRAW)
-        return 100;
+        return DRAW;
     assert(node != MCTS_NULL);
 
     struct mcts_node *n = m->nodes + node;
@@ -376,7 +378,7 @@ mcts_playout(struct mcts *m, uint32_t node, int turn)
                 n->total_playouts++;
                 n->next[play] = MCTS_DRAW;
                 n->unexplored--;
-                return 100; // neither
+                return DRAW; // neither
             case YAVALATH_GAME_UNRESOLVED:
                 n->next[play] = mcts_alloc(m, next_state);
                 if (n->next[play] == MCTS_NULL)
