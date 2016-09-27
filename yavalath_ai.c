@@ -281,6 +281,29 @@ random_play_simple(uint64_t taken, uint64_t *rng)
 }
 
 static int
+mcts_playout_final(uint64_t *rng, uint64_t *state, int initial_turn)
+{
+    int turn = initial_turn;
+    for (;;) {
+        turn = !turn;
+        uint64_t taken = state[0] | state[1];
+        int play = random_play_simple(taken, rng);
+        state[turn] |= UINT64_C(1) << play;
+        uint64_t dummy;
+        switch (check(state[turn], state[!turn], play, &dummy)) {
+            case YAVALATH_GAME_WIN:
+                return turn;
+            case YAVALATH_GAME_LOSS:
+                return !turn;
+            case YAVALATH_GAME_DRAW:
+                return 100;
+            case YAVALATH_GAME_UNRESOLVED:
+                break;
+        }
+    }
+}
+
+static int
 mcts_playout(struct mcts *m, uint32_t node, int turn)
 {
     if (node == MCTS_WIN0)
@@ -362,29 +385,10 @@ mcts_playout(struct mcts *m, uint32_t node, int turn)
                 break;
         }
         /* Simulate remaining without allocation. */
-        int parent_slot = play;
-        int parent_turn = turn;
-        for (;;) {
-            turn = !turn;
-            uint64_t taken = next_state[0] | next_state[1];
-            int play = random_play_simple(taken, m->rng);
-            next_state[turn] |= UINT64_C(1) << play;
-            uint64_t dummy;
-            switch (check(next_state[turn], next_state[!turn], play, &dummy)) {
-                case YAVALATH_GAME_WIN:
-                    if (turn == parent_turn)
-                        n->wins[parent_slot]++;
-                    return turn;
-                case YAVALATH_GAME_LOSS:
-                    if (turn != parent_turn)
-                        n->wins[parent_slot]++;
-                    return !turn;
-                case YAVALATH_GAME_DRAW:
-                    return 100;
-                case YAVALATH_GAME_UNRESOLVED:
-                    break;
-            }
-        }
+        int winner = mcts_playout_final(m->rng, next_state, turn);
+        if (winner == turn)
+            n->wins[play]++;
+        return winner;
     }
 }
 
