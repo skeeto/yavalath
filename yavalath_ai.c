@@ -9,6 +9,10 @@
 #  define YAVALATH_C  0.5f
 #endif
 
+#define REWARD_WIN   1.0f
+#define REWARD_DRAW -0.1f
+#define REWARD_LOSS -1.0f
+
 #define DRAW  100
 
 static int
@@ -131,7 +135,7 @@ struct mcts {
         uint32_t chain;           // next item in hash table list
         uint64_t state[2];        // the game state at this node
         uint32_t total_playouts;  // number of playouts through this node
-        uint32_t wins[61];        // win counter for each move
+        float    reward[61];      // win counter for each move
         uint32_t playouts[61];    // number of playouts for this play
         uint32_t next[61];        // next node when taking this play
         uint16_t refcount;        // number of nodes referencing this node
@@ -182,7 +186,7 @@ mcts_alloc(struct mcts *m, const uint64_t state[2])
     *head = nodei;
     uint64_t taken = state[0] | state[1];
     for (int i = 0; i < 61; i++) {
-        n->wins[i] = 0;
+        n->reward[i] = 0.0f;
         n->playouts[i] = 0;
         n->next[i] = MCTS_NULL;
         if (!((taken >> i) & 1))
@@ -325,14 +329,14 @@ mcts_playout(struct mcts *m, uint32_t node, int turn)
     if (!n->unexplored) {
         /* Use upper confidence bound (UCB1). */
         uint64_t taken = n->state[0] | n->state[1];
-        float best_x = -1.0f;
+        float best_x = -INFINITY;
         float numerator = YAVALATH_C * logf(n->total_playouts);
         int best[61];
         int nbest = 0;
         for (int i = 0; i < 61; i++) {
             if (!((taken >> i) & 1)) {
                 assert(n->playouts[i]);
-                float mean = n->wins[i] / (float)n->playouts[i];
+                float mean = n->reward[i] / n->playouts[i];
                 float x = mean + sqrtf(numerator / n->playouts[i]);
                 if (x > best_x) {
                     best_x = x;
@@ -350,7 +354,11 @@ mcts_playout(struct mcts *m, uint32_t node, int turn)
             n->total_playouts++;
         }
         if (winner == turn)
-            n->wins[play]++;
+            n->reward[play] += REWARD_WIN;
+        else if (winner == !turn)
+            n->reward[play] += REWARD_LOSS;
+        else if (winner == DRAW)
+            n->reward[play] += REWARD_DRAW;
         return winner;
     } else {
         /* Choose a random unplayed move. */
@@ -363,19 +371,21 @@ mcts_playout(struct mcts *m, uint32_t node, int turn)
             case YAVALATH_GAME_WIN:
                 n->playouts[play]++;
                 n->total_playouts++;
-                n->wins[play]++;
+                n->reward[play] += REWARD_WIN;
                 n->next[play] = turn ? MCTS_WIN1 : MCTS_WIN0;
                 n->unexplored--;
                 return turn;
             case YAVALATH_GAME_LOSS:
                 n->playouts[play]++;
                 n->total_playouts++;
+                n->reward[play] += REWARD_LOSS;
                 n->next[play] = turn ? MCTS_WIN0 : MCTS_WIN1;
                 n->unexplored--;
                 return !turn;
             case YAVALATH_GAME_DRAW:
                 n->playouts[play]++;
                 n->total_playouts++;
+                n->reward[play] += REWARD_DRAW;
                 n->next[play] = MCTS_DRAW;
                 n->unexplored--;
                 return DRAW; // neither
@@ -391,7 +401,11 @@ mcts_playout(struct mcts *m, uint32_t node, int turn)
         /* Simulate remaining without allocation. */
         int winner = mcts_playout_final(m->rng, next_state, turn);
         if (winner == turn)
-            n->wins[play]++;
+            n->reward[play] += REWARD_WIN;
+        else if (winner == !turn)
+            n->reward[play] += REWARD_LOSS;
+        else if (winner == DRAW)
+            n->reward[play] += REWARD_DRAW;
         return winner;
     }
 }
@@ -487,12 +501,12 @@ yavalath_ai_best_move(void *buf)
     struct mcts *m = buf;
     struct mcts_node *n = m->nodes + m->root;
     uint64_t taken = n->state[0] | n->state[1];
-    double best_ratio = -1.0;
+    double best_ratio = -INFINITY;
     int best[61];
     int nbest = 0;
     for (int i = 0; i < 61; i++) {
         if (!((taken >> i) & 1) && n->playouts[i]) {
-            double ratio = n->wins[i] / (double)n->playouts[i];
+            double ratio = n->reward[i] / (double)n->playouts[i];
             if (ratio > best_ratio) {
                 nbest = 1;
                 best[0] = i;
@@ -512,7 +526,7 @@ yavalath_ai_get_move_score(const void *buf, int bit)
     const struct mcts_node *n = m->nodes + m->root;
     uint64_t taken = n->state[0] | n->state[1];
     if (!((taken >> bit) & 1) && n->playouts[bit])
-        return n->wins[bit] / (double)n->playouts[bit];
+        return n->reward[bit] / (double)n->playouts[bit];
     return 0;
 }
 

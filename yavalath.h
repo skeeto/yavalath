@@ -162,8 +162,6 @@ yavalath_ai_best_move(void *buf);
  * `yavalath_ai_best_move()` function could be implemented in terms of
  * this function. It returns the move with the highest score, breaking
  * ties randomly.
- *
- * The score is always within [0.0 - 1.0].
  */
 double
 yavalath_ai_get_move_score(const void *buf, int bit);
