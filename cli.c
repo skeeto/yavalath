@@ -134,7 +134,7 @@ display(uint64_t w, uint64_t b, uint64_t highlight, int color)
 }
 
 struct playout_limits {
-    unsigned long msecs;
+    uint64_t msecs;
     uint32_t playouts;
 };
 
@@ -161,13 +161,14 @@ playout_to_limit(void *buf, struct playout_limits *limits)
         os_restart_line();
         uint32_t nodes_used = yavalath_ai_get_nodes_used(buf);
         uint32_t nodes_total = yavalath_ai_get_nodes_total(buf);
-        printf("%.2f%% memory usage, %" PRIu32 " playouts, %0.1fs remaining",
+        printf("%.2f%% memory usage, %" PRIu32 " playouts, %0.1fs %s",
                100 * nodes_used / (double)nodes_total,
                yavalath_ai_get_total_playouts(buf),
-               timeout / 1e6 - time_end / 1e6);
+               (timeout / 1e6 - time_end / 1e6) * (limits->msecs ? 1 : -1),
+               limits->msecs ? "remaining" : "spent");
         fflush(stdout);
     } while (r == YAVALATH_SUCCESS &&
-             os_uepoch() < timeout &&
+             (!limits->msecs || (os_uepoch() < timeout)) &&
              playouts < limits->playouts);
     puts(" ... done\n");
 }
@@ -237,6 +238,8 @@ main(int argc, char **argv)
                     if (!p[1])
                         goto missing;
                     limits.playouts = strtoll(p + 1, 0, 10);
+                    if (!limits.playouts)
+                        limits.playouts = UINT32_MAX;
                     break;
                 case 'm':
                     if (!p[1])
