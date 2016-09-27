@@ -5,7 +5,9 @@
 #include "yavalath.h"
 #include "tables.h"
 
-#define MCTS_C       2.0f
+#ifndef YAVALATH_C
+#  define YAVALATH_C  0.5f
+#endif
 
 static int
 hex_to_bit(int q, int r)
@@ -322,7 +324,7 @@ mcts_playout(struct mcts *m, uint32_t node, int turn)
         /* Use upper confidence bound (UCB1). */
         uint64_t taken = n->state[0] | n->state[1];
         float best_x = -1.0f;
-        float numerator = MCTS_C * logf(n->total_playouts);
+        float numerator = YAVALATH_C * logf(n->total_playouts);
         int best[61];
         int nbest = 0;
         for (int i = 0; i < 61; i++) {
