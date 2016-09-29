@@ -31,10 +31,9 @@ bottom-right tile is `i5`.
         i . . . . . 6
            1 2 3 4 5
 
-The AI is a [UCT Monte Carlo tree search][mcts] and it's fairly
-strong, especially if given plenty of memory and time. However, it
-currently likes to play against the edge more than makes sense, and I
-don't know why.
+The AI is a [UCT Monte Carlo tree search][mcts] and it's a decent
+player. However, it suffers from UCT's "shallow trap" problem and can
+easily be defeated once you recognize its blind spots.
 
 
 [yl]: http://www.cameronius.com/games/yavalath/
