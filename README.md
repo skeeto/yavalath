@@ -36,6 +36,6 @@ player. However, it suffers from UCT's "shallow trap" problem and can
 easily be defeated once you recognize its blind spots.
 
 
-[yl]: http://www.cameronius.com/games/yavalath/
+[yl]: http://cambolbro.com/games/yavalath/
 [sus]: http://www.stephen.com/sue/sue_man.txt
 [mcts]: https://en.wikipedia.org/wiki/Monte_Carlo_tree_search
